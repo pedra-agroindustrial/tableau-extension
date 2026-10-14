@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tableau TV • Atualização</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: #ffffff;
+      color: #019640;
+      font-family: Arial, Helvetica, sans-serif;
+      font-size: 14px;
+    }
+
+    main {
+      min-height: 64px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      flex-wrap: wrap;
+      background: #ffffff;
+    }
+
+    .status {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    #message {
+      font-size: 14px;
+      font-weight: 600;
+      color: #019640;
+    }
+
+    #last {
+      color: #019640;
+      font-size: 12px;
+    }
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 16px;
+      border: 1px solid #019640;
+      border-radius: 6px;
+      background: #019640;
+      color: #ffffff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s ease;
+    }
+
+    button:hover:not(:disabled) {
+      background: #017d35;
+      border-color: #017d35;
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    #details,
+    #configStatus {
+      margin: 0;
+      padding: 0 16px 10px;
+      font-size: 12px;
+      white-space: pre-wrap;
+    }
+
+    #details {
+      color: #b42318;
+    }
+
+    #configStatus {
+      color: #019640;
+    }
+
+    #details:empty,
+    #configStatus:empty {
+      display: none;
+    }
+
+    @media (max-width: 360px) {
+      main {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
+  </style>
+
+  <script defer src="vendor/tableau.extensions.js"></script>
+  <script defer src="app.js"></script>
+</head>
+
+<body>
+  <main>
+    <div class="status" role="status" aria-live="polite">
+      <div id="message">Conectando ao Tableau…</div>
+      <small id="last">Última atualização completa: —</small>
+    </div>
+
+    <button id="refresh" type="button" disabled>
+      <span aria-hidden="true">↻</span>
+      Atualizar agora
+    </button>
+  </main>
+
+  <p id="configStatus" role="status" aria-live="polite"></p>
+  <p id="details"></p>
+</body>
+</html>
