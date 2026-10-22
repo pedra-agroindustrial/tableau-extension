@@ -9,7 +9,7 @@
     majorTickLength: 23, smallTickLength: 9, majorTickOffset: 0, smallTickOffset: 0, numberOffset: 0,
     majorTickStyle: 'standard', smallTickStyle: 'standard', showMajorTicks: true, showSmallTicks: true,
     design: 'modern', colorPreset: 'mono', useColorRanges: false, colorRanges: [],
-    colors: { progress: '#303030', track: '#e9e9e9', needle: '#303030', labels: '#686868', numbers: '#686868', value: '#303030' }
+    colors: { progress: '#303030', track: '#e9e9e9', needle: '#303030', labels: '#686868', numbers: '#686868', title: '#686868', value: '#303030' }
   };
 
   let config = { ...defaults };
@@ -25,12 +25,12 @@
     n.toLocaleString('pt-BR', { maximumFractionDigits: decimals });
 
   const palettes = {
-    mono: { progress: '#303030', track: '#e9e9e9', needle: '#303030', labels: '#686868', numbers: '#686868', value: '#303030' },
-    ocean: { progress: '#1976d2', track: '#dceaf7', needle: '#0d47a1', labels: '#476579', numbers: '#476579', value: '#17324a' },
-    forest: { progress: '#2e7d32', track: '#e3eee4', needle: '#1b5e20', labels: '#526b54', numbers: '#526b54', value: '#213c25' },
-    sunset: { progress: '#e87516', track: '#f6ead9', needle: '#a84312', labels: '#735e4a', numbers: '#735e4a', value: '#4b3527' },
-    violet: { progress: '#7c3aed', track: '#ece6f7', needle: '#4c1d95', labels: '#675c7e', numbers: '#675c7e', value: '#35245a' },
-    redNeedle: { progress: '#303030', track: '#e6e6e6', needle: '#c51f32', labels: '#282828', numbers: '#282828', value: '#151515' }
+    mono: { progress: '#303030', track: '#e9e9e9', needle: '#303030', labels: '#686868', numbers: '#686868', title: '#686868', value: '#303030' },
+    ocean: { progress: '#1976d2', track: '#dceaf7', needle: '#0d47a1', labels: '#476579', numbers: '#476579', title: '#476579', value: '#17324a' },
+    forest: { progress: '#2e7d32', track: '#e3eee4', needle: '#1b5e20', labels: '#526b54', numbers: '#526b54', title: '#526b54', value: '#213c25' },
+    sunset: { progress: '#e87516', track: '#f6ead9', needle: '#a84312', labels: '#735e4a', numbers: '#735e4a', title: '#735e4a', value: '#4b3527' },
+    violet: { progress: '#7c3aed', track: '#ece6f7', needle: '#4c1d95', labels: '#675c7e', numbers: '#675c7e', title: '#675c7e', value: '#35245a' },
+    redNeedle: { progress: '#303030', track: '#e6e6e6', needle: '#c51f32', labels: '#282828', numbers: '#282828', title: '#282828', value: '#151515' }
   };
 
   const cx = 300, cy = 220, radius = 190;
@@ -188,7 +188,7 @@
         const labelRadius = (realistic ? radius - 54 : 151) + config.numberOffset;
         label.setAttribute('x', cx + labelRadius * Math.cos(radians));
         label.setAttribute('y', cy + labelRadius * Math.sin(radians) + 5);
-        label.setAttribute('font-size', String(16 / (config.poolZoom / 100)));
+        label.style.fontSize = `${16 / (config.poolZoom / 100)}px`;
         label.textContent = number(config.maximum * fraction, realistic ? 0 : tickDecimals()) + (config.unit === '%' ? '%' : '');
         $('ticks').append(label);
       }
@@ -227,12 +227,12 @@
     $('title').textContent = dynamicTitle !== null ? dynamicTitle : (config.title || fieldName || 'Velocímetro');
     $('title').style.display = dynamicTitle === '' ? 'none' : '';
     $('title').style.fontSize = `${config.fontTitle}px`;
-    $('value').setAttribute('font-size', String(config.fontPercentage / zoom));
+    $('value').style.fontSize = `${config.fontPercentage / zoom}px`;
     $('unitLabel').textContent = config.showUnit ? config.unit : '';
-    $('unitLabel').setAttribute('font-size', String(config.fontLabel / zoom));
+    $('unitLabel').style.fontSize = `${config.fontLabel / zoom}px`;
     $('infoLabel').textContent = dynamicInfo;
     $('infoLabel').style.display = dynamicInfo ? '' : 'none';
-    $('infoLabel').setAttribute('font-size', String(config.fontLabel / zoom));
+    $('infoLabel').style.fontSize = `${config.fontLabel / zoom}px`;
     $('infoLabel').setAttribute('y', config.design === 'realistic' ? (config.showUnit ? '398' : '366') : (config.showUnit ? '355' : '320'));
     renderTicks();
 
@@ -388,7 +388,7 @@
       colorRanges: gaugeRangesFromForm(),
       colors: {
         progress: $('colorProgressInput').value, track: $('colorTrackInput').value,
-        needle: $('colorNeedleInput').value, labels: $('colorLabelsInput').value, numbers: $('colorNumbersInput').value, value: $('colorValueInput').value
+        needle: $('colorNeedleInput').value, labels: $('colorLabelsInput').value, numbers: $('colorNumbersInput').value, title: $('colorTitleInput').value, value: $('colorValueInput').value
       },
       arcPercent: Number($('arcPercentInput').value)
     };
@@ -541,7 +541,7 @@
         $(`color${key[0].toUpperCase()}${key.slice(1)}Input`).value = value;
       }
     }
-    for (const id of ['colorProgressInput', 'colorTrackInput', 'colorNeedleInput', 'colorLabelsInput', 'colorNumbersInput', 'colorValueInput']) $(id).disabled = !enabled;
+    for (const id of ['colorProgressInput', 'colorTrackInput', 'colorNeedleInput', 'colorLabelsInput', 'colorNumbersInput', 'colorTitleInput', 'colorValueInput']) $(id).disabled = !enabled;
   }
 
   $('colorPresetInput').addEventListener('change', syncColorControls);
