@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Última atualização</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: transparent;
+      color: #102234;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    main {
+      min-height: 55px;
+      padding: 10px 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .indicator {
+      width: 8px;
+      height: 8px;
+      flex-shrink: 0;
+      border-radius: 50%;
+      background: #269653;
+    }
+
+    .status {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    #label {
+      font-size: 12px;
+      color: #667085;
+    }
+
+    #last {
+      font-size: 14px;
+      font-weight: 600;
+      color: #102234;
+    }
+  </style>
+
+  <script defer src="vendor/tableau.extensions.js"></script>
+  <script defer src="app.js"></script>
+</head>
+
+<body>
+  <main>
+    <span class="indicator"></span>
+
+    <div class="status">
+      <div id="label">Última atualização dos dados</div>
+      <div id="last">Consultando...</div>
+    </div>
+  </main>
+</body>
+</html>
