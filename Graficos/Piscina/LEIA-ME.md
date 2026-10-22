@@ -1,6 +1,6 @@
 # Piscina percentual para Tableau
 
-Extensão de visualização para Tableau: mostra uma piscina enchendo conforme uma medida agregada da planilha. A superfície da água tem uma onda animada suave, e a altura acompanha o percentual. O desenho se redimensiona automaticamente ao espaço disponível na planilha ou no dashboard. Em Configurar, ajuste a ampliação (90% a 125%), escolha entre manter a proporção ou preencher toda a área, e personalize separadamente as fontes do título, do percentual e do nome da piscina. O padrão amplia o desenho para 120% e mantém a proporção; em áreas pequenas, reduz os espaços e o texto auxiliar. A piscina enche até **100%** e começa a transbordar acima desse valor. Não há capacidade máxima para configurar nem quantidade/capacidade mostrada na parte inferior.
+Extensão de visualização para Tableau: mostra uma piscina enchendo conforme uma medida agregada da planilha. A superfície da água tem uma onda animada suave, e a altura acompanha o percentual. O desenho se redimensiona automaticamente ao espaço disponível na planilha ou no dashboard. Em Configurar, ajuste a ampliação (90% a 125%), escolha entre manter a proporção ou preencher toda a área, e personalize separadamente as fontes do título, do percentual e do nome da piscina. A paleta do desenho e as cores da estrutura, do interior, das bordas e dos textos também podem ser configuradas; o fundo transparente continua disponível. O padrão amplia o desenho para 120% e mantém a proporção; em áreas pequenas, reduz os espaços e o texto auxiliar. A piscina enche até **100%** e começa a transbordar acima desse valor. Não há capacidade máxima para configurar nem quantidade/capacidade mostrada na parte inferior.
 
 A cor do líquido usa uma faixa vermelha de 0% a 100% por padrão. Em Configurar, use **+ Adicionar faixa** para criar até 10 faixas; escolha a cor e o limite final de cada uma. O início acompanha o limite da anterior. O limite final começa em 100%, mas pode ser elevado até 500% para classificar valores maiores. A piscina enche aos 100% e começa a transbordar acima desse valor. As moscas animadas foram removidas desta versão. A tubulação lateral foi removida.
 
@@ -40,3 +40,6 @@ Zero mostra 0% e piscina vazia. Nulo, ausência de dados ou erro mostram travess
 ## Arquivos de prévia
 
 `PREVIA-EXEMPLO.png` e `PREVIA-EXEMPLO.svg` mostram um exemplo visual fixo de 56,9%; eles não fornecem os dados da extensão.
+
+
+**Fundo transparente:** em Configurar, selecione **Transparente** e clique em **Salvar configuração**. A extensão passa a revelar a cor de fundo definida na planilha ou no dashboard; se essa área estiver cinza, o fundo visível também será cinza.

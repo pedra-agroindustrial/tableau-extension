@@ -1,7 +1,8 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const defaults = {title:'Piscina',label:'PISCINA',decimals:1,theme:'gray',poolZoom:120,fitMode:'proportional',fontTitle:18,fontPercentage:29,fontLabel:20,ranges:[{color:'#e53935',end:100}]};
+  const defaults = {title:'Piscina',label:'PISCINA',decimals:1,theme:'gray',poolZoom:120,fitMode:'proportional',fontTitle:18,fontPercentage:29,fontLabel:20,colorPreset:'mono',colors:{walls:'#c5c5c5',empty:'#eeeeee',edge:'#d8d8d8',title:'#686868',label:'#303030'},ranges:[{color:'#e53935',end:100}]};
+  const palettes={mono:{walls:'#c5c5c5',empty:'#eeeeee',edge:'#d8d8d8',title:'#686868',label:'#303030'},ocean:{walls:'#b6ccd8',empty:'#e6f4fb',edge:'#8eafbd',title:'#476579',label:'#17324a'},forest:{walls:'#b9cdbb',empty:'#e3eee4',edge:'#91af94',title:'#526b54',label:'#213c25'},sunset:{walls:'#e2c6a6',empty:'#f6ead9',edge:'#cba27d',title:'#735e4a',label:'#4b3527'},violet:{walls:'#c9bddb',empty:'#ece6f7',edge:'#a090bc',title:'#675c7e',label:'#35245a'}};
   let config={...defaults},sheet,author=false,saving=false,running=false,pending=false;
   let current=null,fieldName='',dataMessage='',dynamic={title:null,label:null,limit1:null},level=0,animation,waveAnimation=null,wavePhase=0,resizeObserver=null,resizeFrame=0;
   const validColor = c => typeof c==='string' && /^#[0-9a-fA-F]{6}$/.test(c);
@@ -38,6 +39,8 @@
         fontTitle:Number.isInteger(c.fontTitle)&&c.fontTitle>=10&&c.fontTitle<=36?c.fontTitle:defaults.fontTitle,
         fontPercentage:Number.isInteger(c.fontPercentage)&&c.fontPercentage>=16&&c.fontPercentage<=48?c.fontPercentage:defaults.fontPercentage,
         fontLabel:Number.isInteger(c.fontLabel)&&c.fontLabel>=12&&c.fontLabel<=36?c.fontLabel:defaults.fontLabel,
+        colorPreset:['mono','ocean','forest','sunset','violet','custom'].includes(c.colorPreset)?c.colorPreset:defaults.colorPreset,
+        colors:Object.fromEntries(Object.entries(defaults.colors).map(([key,fallback])=>[key,validColor(c.colors?.[key])?c.colors[key]:fallback])),
         ranges};
     }catch(_){return defaultConfig();}
   }
@@ -102,7 +105,9 @@
     const tick=t=>{wavePhase=t*0.0015;drawLiquid();waveAnimation=requestAnimationFrame(tick);};waveAnimation=requestAnimationFrame(tick);
   }
   function render(){
-    for(const theme of ['gray','transparent','dark'])document.body.classList.toggle(theme,config.theme===theme);
+    const selectedColors=config.colorPreset==='custom'?config.colors:(palettes[config.colorPreset]||palettes.mono);
+    for(const [key,value] of Object.entries(selectedColors))document.body.style.setProperty(`--pool-${key}`,value);
+    for(const theme of ['gray','transparent','dark']){document.documentElement.classList.toggle(theme,config.theme===theme);document.body.classList.toggle(theme,config.theme===theme);}
     const zoom=config.poolZoom/100,viewWidth=640/zoom,viewHeight=390/zoom;
     $('pool').setAttribute('viewBox',`${(640-viewWidth)/2} ${(390-viewHeight)/2} ${viewWidth} ${viewHeight}`);
     $('pool').setAttribute('preserveAspectRatio',config.fitMode==='fill'?'none':'xMidYMid meet');
@@ -129,11 +134,13 @@
     $('poolZoomInput').value=String(config.poolZoom);$('fitModeInput').value=config.fitMode;
     $('fontTitleInput').value=String(config.fontTitle);$('fontPercentageInput').value=String(config.fontPercentage);$('fontLabelInput').value=String(config.fontLabel);updateSizeOutputs();
     renderRangeEditor(config.ranges.map(r=>({...r})));$('themeInput').value=config.theme;
+    $('colorPresetInput').value=config.colorPreset;for(const [key,value] of Object.entries(config.colors))$(`color${key[0].toUpperCase()}${key.slice(1)}Input`).value=value;syncColorControls();
     $('saveStatus').textContent='';$('settingsPanel').hidden=false;
   }
   async function saveConfig(e){
     e.preventDefault();if(!author||saving)return;
-    const candidate={title:$('titleInput').value.trim(),label:$('labelInput').value.trim(),decimals:Number($('decimalsInput').value),theme:$('themeInput').value,poolZoom:Number($('poolZoomInput').value),fitMode:$('fitModeInput').value,fontTitle:Number($('fontTitleInput').value),fontPercentage:Number($('fontPercentageInput').value),fontLabel:Number($('fontLabelInput').value),ranges:rangesFromForm()};
+    const candidate={title:$('titleInput').value.trim(),label:$('labelInput').value.trim(),decimals:Number($('decimalsInput').value),theme:$('themeInput').value,colorPreset:$('colorPresetInput').value,colors:{walls:$('colorWallsInput').value,empty:$('colorEmptyInput').value,edge:$('colorEdgeInput').value,title:$('colorTitleInput').value,label:$('colorLabelInput').value},poolZoom:Number($('poolZoomInput').value),fitMode:$('fitModeInput').value,fontTitle:Number($('fontTitleInput').value),fontPercentage:Number($('fontPercentageInput').value),fontLabel:Number($('fontLabelInput').value),ranges:rangesFromForm()};
+    if(!['mono','ocean','forest','sunset','violet','custom'].includes(candidate.colorPreset)||!Object.values(candidate.colors).every(validColor)){ $('saveStatus').textContent='Confira as cores personalizadas.';return;}
     if(!Number.isInteger(candidate.poolZoom)||candidate.poolZoom<90||candidate.poolZoom>125||!['proportional','fill'].includes(candidate.fitMode)||!Number.isInteger(candidate.fontTitle)||candidate.fontTitle<10||candidate.fontTitle>36||!Number.isInteger(candidate.fontPercentage)||candidate.fontPercentage<16||candidate.fontPercentage>48||!Number.isInteger(candidate.fontLabel)||candidate.fontLabel<12||candidate.fontLabel>36){$('saveStatus').textContent='Confira a ampliação (90% a 125%) e os tamanhos das fontes dentro dos limites indicados.';return;}
     if(!validRanges(candidate.ranges)){$('saveStatus').textContent='As faixas precisam estar em ordem crescente e terminar em um limite entre 0% e 500%. Ajuste o limite “Até (%)” de cada faixa.';return;}
     const settings=tableau.extensions.settings,previous=settings.get('poolConfig');saving=true;$('save').disabled=true;$('close').disabled=true;$('saveStatus').textContent='Salvando…';
@@ -179,6 +186,8 @@
     }finally{if(reader)await reader.releaseAsync();}
   }
   async function update(){pending=true;if(running)return;running=true;try{while(pending){pending=false;try{const result=await readValue();current=result.value;fieldName=result.name;dynamic=result.dynamic||{title:null,label:null,limit1:null};dataMessage=result.message;}catch(err){current=null;dynamic={title:null,label:null,limit1:null};dataMessage='Não foi possível ler os campos da planilha: '+String(err.message||err);}if(!pending)render();}}finally{running=false;}}
+  function syncColorControls(event){const preset=$('colorPresetInput').value;if(event&&palettes[preset])for(const [key,value] of Object.entries(palettes[preset]))$(`color${key[0].toUpperCase()}${key.slice(1)}Input`).value=value;const enabled=preset==='custom';for(const id of ['colorWallsInput','colorEmptyInput','colorEdgeInput','colorTitleInput','colorLabelInput'])$(id).disabled=!enabled;}
+  $('colorPresetInput').addEventListener('change',syncColorControls);
   function updateSizeOutputs(){for(const [id,out] of [['poolZoomInput','poolZoomValue'],['fontTitleInput','fontTitleValue'],['fontPercentageInput','fontPercentageValue'],['fontLabelInput','fontLabelValue']])$(out).textContent=$(id).value+(id==='poolZoomInput'?'%':' px');}
   for(const id of ['poolZoomInput','fontTitleInput','fontPercentageInput','fontLabelInput'])$(id).addEventListener('input',updateSizeOutputs);
   $('addRange').addEventListener('click',addRange);
