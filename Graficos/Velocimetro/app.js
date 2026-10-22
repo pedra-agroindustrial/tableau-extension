@@ -6,10 +6,10 @@
     maximum: 100, title: 'Velocímetro', unit: '%',
     decimals: 1, theme: 'light', poolZoom: 120, fitMode: 'proportional',
     fontTitle: 18, fontPercentage: 29, fontLabel: 20, arcPercent: 70, showUnit: true,
-    majorTickLength: 23, smallTickLength: 9, majorTickOffset: 0, smallTickOffset: 0,
+    majorTickLength: 23, smallTickLength: 9, majorTickOffset: 0, smallTickOffset: 0, numberOffset: 0,
     majorTickStyle: 'standard', smallTickStyle: 'standard', showMajorTicks: true, showSmallTicks: true,
-    design: 'modern', colorPreset: 'mono',
-    colors: { progress: '#303030', track: '#e9e9e9', needle: '#303030', labels: '#686868', value: '#303030' }
+    design: 'modern', colorPreset: 'mono', useColorRanges: false, colorRanges: [],
+    colors: { progress: '#303030', track: '#e9e9e9', needle: '#303030', labels: '#686868', numbers: '#686868', value: '#303030' }
   };
 
   let config = { ...defaults };
@@ -19,16 +19,18 @@
   const ns = 'http://www.w3.org/2000/svg';
   const finite = n => typeof n === 'number' && Number.isFinite(n);
   const validMax = n => finite(n) && n > 0;
+  const validColor = c => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c);
+  const validColorRanges = ranges => Array.isArray(ranges) && ranges.length >= 1 && ranges.length <= 10 && ranges.every((r, i) => validColor(r.color) && finite(r.end) && r.end > (i ? ranges[i - 1].end : 0) && r.end <= 500);
   const number = (n, decimals = config.decimals) =>
     n.toLocaleString('pt-BR', { maximumFractionDigits: decimals });
 
   const palettes = {
-    mono: { progress: '#303030', track: '#e9e9e9', needle: '#303030', labels: '#686868', value: '#303030' },
-    ocean: { progress: '#1976d2', track: '#dceaf7', needle: '#0d47a1', labels: '#476579', value: '#17324a' },
-    forest: { progress: '#2e7d32', track: '#e3eee4', needle: '#1b5e20', labels: '#526b54', value: '#213c25' },
-    sunset: { progress: '#e87516', track: '#f6ead9', needle: '#a84312', labels: '#735e4a', value: '#4b3527' },
-    violet: { progress: '#7c3aed', track: '#ece6f7', needle: '#4c1d95', labels: '#675c7e', value: '#35245a' },
-    redNeedle: { progress: '#303030', track: '#e6e6e6', needle: '#c51f32', labels: '#282828', value: '#151515' }
+    mono: { progress: '#303030', track: '#e9e9e9', needle: '#303030', labels: '#686868', numbers: '#686868', value: '#303030' },
+    ocean: { progress: '#1976d2', track: '#dceaf7', needle: '#0d47a1', labels: '#476579', numbers: '#476579', value: '#17324a' },
+    forest: { progress: '#2e7d32', track: '#e3eee4', needle: '#1b5e20', labels: '#526b54', numbers: '#526b54', value: '#213c25' },
+    sunset: { progress: '#e87516', track: '#f6ead9', needle: '#a84312', labels: '#735e4a', numbers: '#735e4a', value: '#4b3527' },
+    violet: { progress: '#7c3aed', track: '#ece6f7', needle: '#4c1d95', labels: '#675c7e', numbers: '#675c7e', value: '#35245a' },
+    redNeedle: { progress: '#303030', track: '#e6e6e6', needle: '#c51f32', labels: '#282828', numbers: '#282828', value: '#151515' }
   };
 
   const cx = 300, cy = 220, radius = 190;
@@ -64,7 +66,7 @@
         unit: typeof c.unit === 'string' && c.unit.trim() ? (c.unit.trim().toLowerCase() === 'km/h' ? '%' : c.unit.slice(0, 24)) : defaults.unit,
         decimals: Number.isInteger(c.decimals) && c.decimals >= 0 && c.decimals <= 3
           ? c.decimals : 1,
-        theme: c.theme === 'dark' ? 'dark' : 'light',
+        theme: ['light', 'gray', 'transparent', 'dark'].includes(c.theme) ? c.theme : defaults.theme,
         arcPercent: Number.isInteger(c.arcPercent) && c.arcPercent >= 50 && c.arcPercent <= 80 ? c.arcPercent : defaults.arcPercent,
         poolZoom: Number.isInteger(c.poolZoom) && c.poolZoom >= 90 && c.poolZoom <= 125
           ? c.poolZoom : defaults.poolZoom,
@@ -82,13 +84,16 @@
           ? (c.smallTickLength === 12 ? defaults.smallTickLength : c.smallTickLength) : defaults.smallTickLength,
         majorTickOffset: Number.isInteger(c.majorTickOffset) && c.majorTickOffset >= -24 && c.majorTickOffset <= 24 ? c.majorTickOffset : defaults.majorTickOffset,
         smallTickOffset: Number.isInteger(c.smallTickOffset) && c.smallTickOffset >= -24 && c.smallTickOffset <= 24 ? c.smallTickOffset : defaults.smallTickOffset,
+        numberOffset: Number.isInteger(c.numberOffset) && c.numberOffset >= -24 && c.numberOffset <= 24 ? c.numberOffset : defaults.numberOffset,
         majorTickStyle: ['standard', 'thin', 'bold', 'dot'].includes(c.majorTickStyle) ? c.majorTickStyle : defaults.majorTickStyle,
         smallTickStyle: ['standard', 'thin', 'bold', 'dot'].includes(c.smallTickStyle) ? c.smallTickStyle : defaults.smallTickStyle,
         showMajorTicks: typeof c.showMajorTicks === 'boolean' ? c.showMajorTicks : defaults.showMajorTicks,
         showSmallTicks: typeof c.showSmallTicks === 'boolean' ? c.showSmallTicks : defaults.showSmallTicks,
         design: ['modern', 'minimal', 'analog', 'realistic'].includes(c.design) ? c.design : defaults.design,
         colorPreset: ['mono', 'ocean', 'forest', 'sunset', 'violet', 'redNeedle', 'custom'].includes(c.colorPreset) ? c.colorPreset : defaults.colorPreset,
-        colors: Object.fromEntries(Object.entries(defaults.colors).map(([key, fallback]) => [key, /^#[0-9a-fA-F]{6}$/.test(c.colors?.[key] || '') ? c.colors[key] : fallback]))
+        colors: Object.fromEntries(Object.entries(defaults.colors).map(([key, fallback]) => [key, validColor(c.colors?.[key]) ? c.colors[key] : fallback])),
+        useColorRanges: typeof c.useColorRanges === 'boolean' ? c.useColorRanges : defaults.useColorRanges,
+        colorRanges: Array.isArray(c.colorRanges) && validColorRanges(c.colorRanges.map(r => ({color:r.color,end:Number(r.end)}))) ? c.colorRanges.map(r => ({color:r.color,end:Number(r.end)})) : []
       };
     } catch (_) {
       return { ...defaults };
@@ -180,7 +185,7 @@
       }
       if (major) {
         const label = document.createElementNS(ns, 'text');
-        const labelRadius = realistic ? radius - 54 : 151;
+        const labelRadius = (realistic ? radius - 54 : 151) + config.numberOffset;
         label.setAttribute('x', cx + labelRadius * Math.cos(radians));
         label.setAttribute('y', cy + labelRadius * Math.sin(radians) + 5);
         label.setAttribute('font-size', String(16 / (config.poolZoom / 100)));
@@ -196,7 +201,10 @@
   }
 
   function render() {
-    document.body.classList.toggle('dark', config.theme === 'dark');
+    for (const theme of ['gray', 'transparent', 'dark']) {
+      document.documentElement.classList.toggle(theme, config.theme === theme);
+      document.body.classList.toggle(theme, config.theme === theme);
+    }
     document.body.dataset.design = config.design;
     const colors = config.colorPreset === 'custom' ? config.colors : palettes[config.colorPreset] || palettes.mono;
     for (const [key, value] of Object.entries(colors)) document.body.style.setProperty(`--gauge-${key}`, value);
@@ -232,6 +240,14 @@
     const usable = hasValue && validMax(config.maximum);
     $('value').textContent = hasValue ? number(current) : '—';
     $('unitLabel').textContent = config.showUnit ? config.unit : '';
+    let progressColor = colors.progress;
+    if (usable && config.useColorRanges && config.colorRanges.length) {
+      const percent = Math.max(0, current / config.maximum * 100);
+      let rangeIndex = config.colorRanges.findIndex((range, i) => percent < range.end || i === config.colorRanges.length - 1);
+      if (rangeIndex < 0) rangeIndex = config.colorRanges.length - 1;
+      progressColor = config.colorRanges[rangeIndex].color;
+    }
+    $('progress').style.stroke = progressColor;
     $('progress').style.strokeDasharray = `${usable ? Math.min(1, Math.max(0, current / config.maximum)) * 100 : 0} 100`;
     $('needle').style.visibility = usable ? 'visible' : 'hidden';
     moveNeedle(usable ? calculateAngle(current) : zeroAngle(), usable && current > 0);
@@ -251,6 +267,50 @@
     );
   }
 
+  function gaugeRangesFromForm() {
+    return [...$('gaugeRangesContainer').querySelectorAll('.range-row')]
+      .map(row => ({ color: row.querySelector('.range-color').value, end: Number(row.querySelector('.range-end').value) }));
+  }
+
+  function renderGaugeRangeEditor(ranges) {
+    $('gaugeRangesContainer').innerHTML = ranges.map((range, i) => {
+      const start = i ? ranges[i - 1].end : 0;
+      return `<fieldset class="range-row"><legend>Faixa ${i + 1}</legend><label>Cor<input class="range-color" type="color" value="${range.color}"></label><div class="range-bounds"><label>De (%)<input class="range-start" type="number" value="${start}" readonly></label><label>Até (%)<input class="range-end" type="number" min="${start}" max="500" step="0.1" value="${range.end}"></label></div><button class="remove-range" type="button" ${ranges.length === 1 ? 'disabled' : ''}>Remover faixa</button></fieldset>`;
+    }).join('');
+    $('addGaugeRange').disabled = ranges.length >= 10;
+    $('gaugeRangesContainer').querySelectorAll('.remove-range').forEach(button => button.addEventListener('click', () => {
+      const currentRanges = gaugeRangesFromForm();
+      if (!validColorRanges(currentRanges)) { $('saveStatus').textContent = 'Ajuste os limites das faixas em ordem crescente antes de remover.'; return; }
+      const last = currentRanges[currentRanges.length - 1].end;
+      currentRanges.splice([...$('gaugeRangesContainer').querySelectorAll('.remove-range')].indexOf(button), 1);
+      currentRanges[currentRanges.length - 1].end = last;
+      renderGaugeRangeEditor(currentRanges);
+    }));
+    $('gaugeRangesContainer').querySelectorAll('.range-end').forEach(input => input.addEventListener('input', () => {
+      let start = 0;
+      $('gaugeRangesContainer').querySelectorAll('.range-row').forEach(row => {
+        row.querySelector('.range-start').value = String(start);
+        row.querySelector('.range-end').min = String(start);
+        start = Number(row.querySelector('.range-end').value);
+      });
+    }));
+  }
+
+  function addGaugeRange() {
+    const ranges = gaugeRangesFromForm();
+    if (!validColorRanges(ranges)) { $('saveStatus').textContent = 'Ajuste os limites das faixas em ordem crescente antes de adicionar outra.'; return; }
+    if (ranges.length >= 10) return;
+    const end = ranges[ranges.length - 1].end;
+    const start = ranges.length > 1 ? ranges[ranges.length - 2].end : 0;
+    const split = Math.round(((start + end) / 2) * 10) / 10;
+    if (split <= start || split >= end) { $('saveStatus').textContent = 'Não há espaço entre os limites para adicionar uma faixa.'; return; }
+    ranges[ranges.length - 1].end = split;
+    const colors = ['#ffb300', '#43a047', '#1e88e5', '#8e24aa', '#00acc1', '#f4511e', '#3949ab', '#7cb342', '#6d4c41'];
+    ranges.push({ color: colors[(ranges.length - 1) % colors.length], end });
+    renderGaugeRangeEditor(ranges);
+    $('saveStatus').textContent = '';
+  }
+
   function openConfig() {
     if (!author || saving) return;
     $('maxInput').value = config.maximum ?? '';
@@ -258,6 +318,10 @@
     $('unitInput').value = config.unit;
     $('decimalsInput').value = String(config.decimals);
     $('themeInput').value = config.theme;
+    $('useColorRangesInput').checked = config.useColorRanges;
+    const initialRangeColor = (config.colorPreset === 'custom' ? config.colors : palettes[config.colorPreset] || palettes.mono).progress;
+    renderGaugeRangeEditor(config.colorRanges.length ? config.colorRanges.map(r => ({...r})) : [{color:initialRangeColor,end:100}]);
+    $('colorRangesPanel').hidden = !config.useColorRanges;
     $('poolZoomInput').value = String(config.poolZoom);
     $('fitModeInput').value = config.fitMode;
     $('fontTitleInput').value = String(config.fontTitle);
@@ -268,6 +332,7 @@
     $('smallTickLengthInput').value = String(config.smallTickLength);
     $('majorTickOffsetInput').value = String(config.majorTickOffset);
     $('smallTickOffsetInput').value = String(config.smallTickOffset);
+    $('numberOffsetInput').value = String(config.numberOffset);
     $('majorTickStyleInput').value = config.majorTickStyle;
     $('smallTickStyleInput').value = config.smallTickStyle;
     $('showMajorTicksInput').checked = config.showMajorTicks;
@@ -312,15 +377,18 @@
       smallTickLength: Number($('smallTickLengthInput').value),
       majorTickOffset: Number($('majorTickOffsetInput').value),
       smallTickOffset: Number($('smallTickOffsetInput').value),
+      numberOffset: Number($('numberOffsetInput').value),
       majorTickStyle: $('majorTickStyleInput').value,
       smallTickStyle: $('smallTickStyleInput').value,
       showMajorTicks: $('showMajorTicksInput').checked,
       showSmallTicks: $('showSmallTicksInput').checked,
       design: $('designInput').value,
       colorPreset: $('colorPresetInput').value,
+      useColorRanges: $('useColorRangesInput').checked,
+      colorRanges: gaugeRangesFromForm(),
       colors: {
         progress: $('colorProgressInput').value, track: $('colorTrackInput').value,
-        needle: $('colorNeedleInput').value, labels: $('colorLabelsInput').value, value: $('colorValueInput').value
+        needle: $('colorNeedleInput').value, labels: $('colorLabelsInput').value, numbers: $('colorNumbersInput').value, value: $('colorValueInput').value
       },
       arcPercent: Number($('arcPercentInput').value)
     };
@@ -334,13 +402,15 @@
         !Number.isInteger(candidate.smallTickLength) || candidate.smallTickLength < 4 || candidate.smallTickLength > 28 ||
         !Number.isInteger(candidate.majorTickOffset) || candidate.majorTickOffset < -24 || candidate.majorTickOffset > 24 ||
         !Number.isInteger(candidate.smallTickOffset) || candidate.smallTickOffset < -24 || candidate.smallTickOffset > 24 ||
+        !Number.isInteger(candidate.numberOffset) || candidate.numberOffset < -24 || candidate.numberOffset > 24 ||
         !['standard', 'thin', 'bold', 'dot'].includes(candidate.majorTickStyle) ||
         !['standard', 'thin', 'bold', 'dot'].includes(candidate.smallTickStyle) ||
         !['modern', 'minimal', 'analog', 'realistic'].includes(candidate.design) ||
         !['mono', 'ocean', 'forest', 'sunset', 'violet', 'redNeedle', 'custom'].includes(candidate.colorPreset) ||
-        !Object.values(candidate.colors).every(color => /^#[0-9a-fA-F]{6}$/.test(color)) ||
+        !Object.values(candidate.colors).every(validColor) ||
+        (candidate.useColorRanges && !validColorRanges(candidate.colorRanges)) ||
         !Number.isInteger(candidate.arcPercent) || candidate.arcPercent < 50 || candidate.arcPercent > 80) {
-      $('saveStatus').textContent = 'Confira o arco, a ampliação, as fontes e os traços (principais: 8–30 px; menores: 4–28 px).';
+      $('saveStatus').textContent = 'Confira o arco, as fontes, os traços e, se ativadas, as faixas de cor em ordem crescente até 500%.';
       return;
     }
 
@@ -471,10 +541,12 @@
         $(`color${key[0].toUpperCase()}${key.slice(1)}Input`).value = value;
       }
     }
-    for (const id of ['colorProgressInput', 'colorTrackInput', 'colorNeedleInput', 'colorLabelsInput', 'colorValueInput']) $(id).disabled = !enabled;
+    for (const id of ['colorProgressInput', 'colorTrackInput', 'colorNeedleInput', 'colorLabelsInput', 'colorNumbersInput', 'colorValueInput']) $(id).disabled = !enabled;
   }
 
   $('colorPresetInput').addEventListener('change', syncColorControls);
+  $('addGaugeRange').addEventListener('click', addGaugeRange);
+  $('useColorRangesInput').addEventListener('change', () => { $('colorRangesPanel').hidden = !$('useColorRangesInput').checked; });
   $('designInput').addEventListener('change', () => {
     if ($('designInput').value === 'realistic' && $('colorPresetInput').value === 'mono') {
       $('colorPresetInput').value = 'redNeedle';
@@ -487,7 +559,7 @@
       ['poolZoomInput', 'poolZoomValue'], ['fontTitleInput', 'fontTitleValue'],
       ['fontPercentageInput', 'fontPercentageValue'], ['fontLabelInput', 'fontLabelValue'],
       ['arcPercentInput', 'arcPercentValue'], ['majorTickLengthInput', 'majorTickLengthValue'], ['smallTickLengthInput', 'smallTickLengthValue'],
-      ['majorTickOffsetInput', 'majorTickOffsetValue'], ['smallTickOffsetInput', 'smallTickOffsetValue']
+      ['majorTickOffsetInput', 'majorTickOffsetValue'], ['smallTickOffsetInput', 'smallTickOffsetValue'], ['numberOffsetInput', 'numberOffsetValue']
     ]) {
       const value = Number($(id).value);
       const text = id === 'arcPercentInput' ? `${value}% da circunferência`
@@ -497,7 +569,7 @@
     }
   }
 
-  for (const id of ['poolZoomInput', 'fontTitleInput', 'fontPercentageInput', 'fontLabelInput', 'arcPercentInput', 'majorTickLengthInput', 'smallTickLengthInput', 'majorTickOffsetInput', 'smallTickOffsetInput']) {
+  for (const id of ['poolZoomInput', 'fontTitleInput', 'fontPercentageInput', 'fontLabelInput', 'arcPercentInput', 'majorTickLengthInput', 'smallTickLengthInput', 'majorTickOffsetInput', 'smallTickOffsetInput', 'numberOffsetInput']) {
     $(id).addEventListener('input', updateSizeOutputs);
   }
 
