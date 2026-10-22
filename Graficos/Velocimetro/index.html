@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Velocímetro</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="style.css?v=1.3.13">
+  <script defer src="vendor/tableau.extensions.js"></script>
+  <script defer src="app.js?v=1.3.13"></script>
+</head>
+<body>
+  <button id="configure" hidden>Configurar</button>
+  <main id="main">
+    <div id="title">Velocímetro</div>
+    <svg id="gauge" viewBox="0 0 600 500" role="img" aria-label="Velocímetro aguardando dados">
+      <defs>
+        <linearGradient id="bezelGradient" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#737779"/><stop offset=".25" stop-color="#f5f5f5"/><stop offset=".55" stop-color="#9da1a2"/><stop offset=".8" stop-color="#f8f8f8"/><stop offset="1" stop-color="#777b7c"/></linearGradient>
+        <radialGradient id="faceGradient" cx="45%" cy="35%" r="75%"><stop offset="0" stop-color="#fff"/><stop offset=".72" stop-color="#f1f1ef"/><stop offset="1" stop-color="#cfd1d1"/></radialGradient>
+      </defs>
+      <g id="realisticDecor" style="display:none" aria-hidden="true">
+        <circle class="bezel-outer" cx="300" cy="220" r="198"/>
+        <circle class="bezel-rim" cx="300" cy="220" r="190"/>
+        <circle class="dial-face" cx="300" cy="220" r="181"/>
+        <circle class="dial-inner-rim" cx="300" cy="220" r="174"/>
+      </g>
+      <path id="track" class="track" d="M 146.31 331.72 A 190 190 0 1 1 453.69 331.72"/>
+      <path id="progress" d="M 146.31 331.72 A 190 190 0 1 1 453.69 331.72" pathLength="100"/>
+      <g id="ticks"></g>
+      <g id="needle" transform="rotate(-36 300 220)">
+        <path class="needle-modern" d="M 300 212 L 125 220 L 300 228 Z"/>
+        <path class="needle-analog" d="M 300 217 L 120 220 L 300 223 Z"/>
+        <path class="needle-realistic" d="M 300 217 L 118 220 L 300 223 Z"/>
+        <circle id="needlePivot" cx="300" cy="220" r="12"/>
+      </g>
+      <g id="realisticSideHubs" style="display:none" aria-hidden="true">
+        <circle class="side-hub" cx="232" cy="220" r="8"/>
+        <rect class="side-hub-mark" x="226" y="218" width="12" height="4" rx="2"/>
+        <circle class="side-hub" cx="368" cy="220" r="8"/>
+        <rect class="side-hub-mark" x="362" y="218" width="12" height="4" rx="2"/>
+      </g>
+      <text id="value" x="300" y="280" text-anchor="middle">—</text>
+      <text id="unitLabel" x="300" y="315" text-anchor="middle"></text>
+      <text id="infoLabel" x="300" y="355" text-anchor="middle"></text>
+    </svg>
+    <p id="notice" role="status">Conectando ao Tableau…</p>
+  </main>
+
+  <section id="settingsPanel" hidden aria-label="Configuração do velocímetro">
+    <form id="settingsForm" novalidate>
+      <h2>Configurar velocímetro</h2>
+      <p>Escala inicial de <strong>0% a 100%</strong>. O máximo pode ser ajustado; o ângulo do arco fica salvo com esta planilha. O ponteiro fica parado em zero e oscila levemente quando indica velocidade positiva.</p>
+      <label>Máximo da escala
+        <input id="maxInput" inputmode="decimal" placeholder="Ex.: 200" required>
+      </label>
+      <label>Título manual (opcional)
+        <input id="titleInput" maxlength="80" value="Velocímetro">
+      </label>
+      <p class="hint">Arraste um campo textual para a entrada <strong>Título</strong> no cartão Marcas para preencher o título automaticamente. Se esse campo retornar nulo ou vazio (&quot;&quot;), o título fica oculto. Sem campo nessa entrada, é usado o título manual; se ele também estiver vazio, aparece o nome da medida.</p>
+      <label>Unidade exibida
+        <input id="unitInput" maxlength="24" placeholder="%">
+      </label>
+      <label class="checkbox-label"><input id="showUnitInput" type="checkbox" checked> Mostrar a unidade abaixo do valor</label>
+      <p class="hint">Arraste outro campo para <strong>Informação</strong> no cartão Marcas para exibi-lo abaixo do valor e da unidade. Valores nulos ou vazios ocultam essa linha.</p>
+      <label>Casas decimais
+        <select id="decimalsInput">
+          <option>0</option><option selected>1</option><option>2</option><option>3</option>
+        </select>
+      </label>
+      <label>Tema
+        <select id="themeInput">
+          <option value="light">Claro — preto e cinza</option>
+          <option value="dark">Escuro — branco e cinza</option>
+        </select>
+      </label>
+      <fieldset class="size-settings">
+        <legend>Design e cores</legend>
+        <label>Estilo do velocímetro
+          <select id="designInput">
+            <option value="modern">Semicircular moderno</option>
+            <option value="minimal">Minimalista</option>
+            <option value="analog">Analógico clássico</option>
+            <option value="realistic">Analógico realista (v1.3.2)</option>
+          </select>
+        </label>
+        <label>Paleta de cores
+          <select id="colorPresetInput">
+            <option value="mono">Monocromática</option>
+            <option value="ocean">Azul oceano</option>
+            <option value="forest">Verde floresta</option>
+            <option value="sunset">Laranja pôr do sol</option>
+            <option value="violet">Violeta</option>
+            <option value="redNeedle">Analógico com ponteiro vermelho</option>
+            <option value="custom">Personalizada</option>
+          </select>
+        </label>
+        <p class="hint">Escolha uma paleta pronta ou selecione Personalizada para editar cada cor.</p>
+        <div class="color-grid">
+          <label>Arco preenchido<input id="colorProgressInput" type="color" value="#303030"></label>
+          <label>Arco restante<input id="colorTrackInput" type="color" value="#e9e9e9"></label>
+          <label>Ponteiro<input id="colorNeedleInput" type="color" value="#303030"></label>
+          <label>Marcas e rótulos<input id="colorLabelsInput" type="color" value="#686868"></label>
+          <label>Valor principal<input id="colorValueInput" type="color" value="#303030"></label>
+        </div>
+      </fieldset>
+      <fieldset class="size-settings">
+        <legend>Tamanho e ajuste</legend>
+        <label>Ângulo do arco: <output id="arcPercentValue">70% da circunferência</output>
+          <input id="arcPercentInput" type="range" min="50" max="80" step="1" value="70">
+        </label>
+        <label class="checkbox-label"><input id="showMajorTicksInput" type="checkbox" checked> Mostrar traços principais (0, 25, 50…)</label>
+        <label>Posição dos traços principais: <output id="majorTickOffsetValue">posição padrão</output>
+          <input id="majorTickOffsetInput" type="range" min="-24" max="24" step="1" value="0">
+        </label>
+        <label>Estilo dos traços principais
+          <select id="majorTickStyleInput">
+            <option value="standard">Linha padrão</option><option value="thin">Linha fina</option>
+            <option value="bold">Linha grossa</option><option value="dot">Pontos</option>
+          </select>
+        </label>
+        <label>Comprimento dos traços principais: <output id="majorTickLengthValue">23 px</output>
+          <input id="majorTickLengthInput" type="range" min="8" max="30" step="1" value="23">
+        </label>
+        <label class="checkbox-label"><input id="showSmallTicksInput" type="checkbox" checked> Mostrar traços menores</label>
+        <label>Posição dos traços menores: <output id="smallTickOffsetValue">posição padrão</output>
+          <input id="smallTickOffsetInput" type="range" min="-24" max="24" step="1" value="0">
+        </label>
+        <label>Estilo dos traços menores
+          <select id="smallTickStyleInput">
+            <option value="standard">Linha padrão</option><option value="thin">Linha fina</option>
+            <option value="bold">Linha grossa</option><option value="dot">Pontos</option>
+          </select>
+        </label>
+        <label>Comprimento dos traços menores: <output id="smallTickLengthValue">9 px</output>
+          <input id="smallTickLengthInput" type="range" min="4" max="28" step="1" value="9">
+        </label>
+        <p class="hint">A escala usa traços principais, intermediários e curtos no padrão analógico; os traços intermediários e curtos seguem a configuração dos traços menores. A ampliação aumenta o velocímetro na área disponível. Manter proporção preserva o formato; preencher a área pode deformá-lo.</p>
+        <label>Ampliação do desenho: <output id="poolZoomValue">120%</output>
+          <input id="poolZoomInput" type="range" min="90" max="125" step="1" value="120">
+        </label>
+        <label>Modo de ajuste
+          <select id="fitModeInput">
+            <option value="proportional">Manter proporção</option>
+            <option value="fill">Preencher toda a área</option>
+          </select>
+        </label>
+        <label>Fonte do título: <output id="fontTitleValue">18 px</output>
+          <input id="fontTitleInput" type="range" min="10" max="36" step="1" value="18">
+        </label>
+        <label>Fonte do valor: <output id="fontPercentageValue">29 px</output>
+          <input id="fontPercentageInput" type="range" min="16" max="48" step="1" value="29">
+        </label>
+        <label>Fonte da unidade: <output id="fontLabelValue">20 px</output>
+          <input id="fontLabelInput" type="range" min="12" max="36" step="1" value="20">
+        </label>
+      </fieldset>
+      <p id="saveStatus" role="status"></p>
+      <div class="actions">
+        <button id="close" type="button">Fechar</button>
+        <button id="save" type="submit">Salvar configuração</button>
+      </div>
+    </form>
+  </section>
+</body>
+</html>
