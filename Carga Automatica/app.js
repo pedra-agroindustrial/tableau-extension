@@ -31,7 +31,7 @@
 
       timer = window.setInterval(
         verificarAtualizacao,
-        3000
+        30000
       );
 
     } catch (err) {
