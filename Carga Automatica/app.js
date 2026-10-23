@@ -1,33 +1,49 @@
-let atualizando = false;
+const INTERVALO = 30000; // tempo de espera APÓS o fim de cada carga
 
-async function atualizarDados() {
-    if (atualizando) return;
+async function obterFontesUnicas() {
+    const fontes = new Map();
+    const worksheets = tableau.extensions.dashboardContent.dashboard.worksheets;
 
-    atualizando = true;
-
-    try {
-        const worksheets =
-            tableau.extensions.dashboardContent.dashboard.worksheets;
-
-        for (const worksheet of worksheets) {
-            const fontes = await worksheet.getDataSourcesAsync();
-
-            for (const fonte of fontes) {
-                if (fonte.refreshAsync) {
-                    await fonte.refreshAsync();
-                }
-            }
+    for (const ws of worksheets) {
+        const lista = await ws.getDataSourcesAsync();
+        for (const fonte of lista) {
+            if (!fontes.has(fonte.id)) fontes.set(fonte.id, fonte);
         }
+    }
+    return [...fontes.values()];
+}
 
-        console.log("Atualização solicitada com sucesso.");
+async function atualizarDados(fontes) {
+    const inicio = Date.now();
+    try {
+        // Atualiza as fontes únicas em paralelo, uma única vez cada
+        const resultados = await Promise.allSettled(
+            fontes.map(f => f.refreshAsync())
+        );
+
+        resultados.forEach((r, i) => {
+            if (r.status === "rejected") {
+                console.error(`Falha na fonte ${fontes[i].name}:`, r.reason);
+            }
+        });
+
+        exibirUltimaAtualizacao(new Date());
+        console.log(`Carga concluída em ${((Date.now() - inicio) / 1000).toFixed(1)}s`,
+                    `(${fontes.length} fonte(s))`);
     } catch (erro) {
         console.error("Erro ao atualizar dados:", erro);
     } finally {
-        atualizando = false;
+        setTimeout(() => atualizarDados(fontes), INTERVALO);
     }
 }
 
-tableau.extensions.initializeAsync().then(() => {
-    atualizarDados();
-    setInterval(atualizarDados, 60000);
+function exibirUltimaAtualizacao(data) {
+    document.getElementById("ultimaAtualizacao").textContent =
+        data.toLocaleString("pt-BR");
+}
+
+tableau.extensions.initializeAsync().then(async () => {
+    const fontes = await obterFontesUnicas();
+    console.log("Fontes encontradas:", fontes.map(f => f.name));
+    atualizarDados(fontes);
 });
