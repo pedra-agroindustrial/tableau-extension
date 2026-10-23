@@ -14,7 +14,8 @@
     steel:{pipe:'#59636a',inside:'#182126',highlight:'#aeb8be',water:'#16a8c4',title:'#303840',text:'#303840'}
   };
   let config={...defaults,ranges:defaults.ranges.map(x=>({...x})),colors:{...defaults.colors}};
-  let author=false,saving=false,sheet=null,current=null,fieldName='',dataMessage='',dynamicTitle=null,dynamicLabel=null,readerTask=0;
+  let author=false,saving=false,sheet=null,current=null,fieldName='',dataMessage='',dynamicTitle=null,dynamicLabel=null;
+  let running=false,pending=false; // controle de leitura (substitui readerTask)
   const finite=n=>typeof n==='number'&&Number.isFinite(n);
   const validColor=c=>typeof c==='string'&&/^#[0-9a-fA-F]{6}$/.test(c);
   const validRanges=a=>Array.isArray(a)&&a.length>=1&&a.length<=10&&a.every((r,i)=>validColor(r.color)&&finite(r.end)&&r.end>(i?a[i-1].end:0)&&r.end<=500);
@@ -119,15 +120,44 @@
     catch(err){if(previous===undefined)settings.erase('flowConfig');else settings.set('flowConfig',previous);$('saveStatus').textContent='Não foi possível salvar: '+String(err.message||err);}
     finally{saving=false;$('save').disabled=false;$('close').disabled=false;}
   }
+
+  // ===== ALTERAÇÃO DE DESEMPENHO =====
+  // 1) Especificação visual em cache fora do modo de edição.
+  let specCache=null;
+  async function getSpec(){
+    if(!author&&specCache)return specCache;
+    const spec=await sheet.getVisualSpecificationAsync();
+    if(!author)specCache=spec;
+    return spec;
+  }
+  // 2) Leitura em uma única chamada (antes: abrir leitor + ler página + liberar leitor).
   async function readValue(){
-    const spec=await sheet.getVisualSpecificationAsync(),card=spec.marksSpecifications[spec.activeMarksSpecificationIndex],enc=card?card.encodings:[];
+    const spec=await getSpec(),card=spec.marksSpecifications[spec.activeMarksSpecificationIndex],enc=card?card.encodings:[];
     const field=id=>{const e=enc.find(x=>x.id===id);return e&&e.field?e.field:null;},valueField=field('value'),titleField=field('title'),labelField=field('label');
     if(!valueField)return {value:null,name:'',title:null,label:null,message:'Arraste uma medida para Valor no cartão Marcas.'};
-    let reader;
-    try{reader=await sheet.getSummaryDataReaderAsync(2,{ignoreSelection:true});if(!reader.pageCount)return {value:null,name:valueField.name,title:null,label:null,message:'Sem dados para os filtros atuais.'};const page=await reader.getPageAsync(0);if(reader.pageCount>1||page.data.length>1)return {value:null,name:valueField.name,title:null,label:null,message:'A extensão recebeu mais de uma linha. Ajuste os filtros para retornar um único valor.'};if(!page.data.length)return {value:null,name:valueField.name,title:null,label:null,message:'Sem dados para os filtros atuais.'};const row=page.data[0];function get(f,allowEmpty=false){if(!f)return undefined;const col=page.columns.find(c=>c.fieldName===f.name);const cell=col?row[col.index]:null;const val=cell&&cell.value;if(val===null||val===undefined||val===''){if(allowEmpty)return '';throw new Error(`O campo ${f.name} está vazio.`);}return val;}const value=get(valueField);if(!finite(value))throw new Error('A medida em Valor precisa ser numérica.');return {value,name:valueField.name,title:titleField?String(get(titleField,true)).trim():null,label:labelField?String(get(labelField,true)).trim():null,message:''};}
-    finally{if(reader)await reader.releaseAsync();}
+    const page=await sheet.getSummaryDataAsync({ignoreSelection:true,maxRows:2});
+    if(page.data.length>1)return {value:null,name:valueField.name,title:null,label:null,message:'A extensão recebeu mais de uma linha. Ajuste os filtros para retornar um único valor.'};
+    if(!page.data.length)return {value:null,name:valueField.name,title:null,label:null,message:'Sem dados para os filtros atuais.'};
+    const row=page.data[0];
+    function get(f,allowEmpty=false){if(!f)return undefined;const col=page.columns.find(c=>c.fieldName===f.name);const cell=col?row[col.index]:null;const val=cell&&cell.value;if(val===null||val===undefined||val===''){if(allowEmpty)return '';throw new Error(`O campo ${f.name} está vazio.`);}return val;}
+    const value=get(valueField);
+    if(!finite(value))throw new Error('A medida em Valor precisa ser numérica.');
+    return {value,name:valueField.name,title:titleField?String(get(titleField,true)).trim():null,label:labelField?String(get(labelField,true)).trim():null,message:''};
   }
-  async function update(){const id=++readerTask;try{const r=await readValue();if(id!==readerTask)return;current=r.value;fieldName=r.name;dynamicTitle=r.title;dynamicLabel=r.label;dataMessage=r.message||'';}catch(err){if(id!==readerTask)return;current=null;dataMessage='Não foi possível ler os dados: '+String(err.message||err);}render();}
+  // 3) Uma leitura por vez: eventos repetidos viram uma única leitura extra (antes, leituras rodavam em paralelo).
+  async function update(){
+    pending=true;if(running)return;running=true;
+    try{
+      while(pending){
+        pending=false;
+        try{const r=await readValue();current=r.value;fieldName=r.name;dynamicTitle=r.title;dynamicLabel=r.label;dataMessage=r.message||'';}
+        catch(err){current=null;dataMessage='Não foi possível ler os dados: '+String(err.message||err);}
+        if(!pending)render();
+      }
+    }finally{running=false;}
+  }
+  // ===== FIM DA ALTERAÇÃO =====
+
   $('addRange').addEventListener('click',addRange);$('paletteInput').addEventListener('change',e=>syncPalette(e));$('settingsForm').addEventListener('submit',saveConfig);$('configure').addEventListener('click',openConfig);$('close').addEventListener('click',()=>{$('settingsPanel').hidden=true;document.body.classList.remove('configuring');});
   for(const id of ['zoomInput','titleFontInput','valueFontInput','labelFontInput','animationSpeedInput'])$(id).addEventListener('input',updateOutputs);
   async function init(){try{if(!window.tableau)throw new Error('Biblioteca Tableau não carregou.');if(window.self===window.top)throw new Error('Adicione a extensão pelo cartão Marcas de uma planilha Tableau.');await tableau.extensions.initializeAsync({configure:openConfig});if(!tableau.extensions.worksheetContent)throw new Error('Use uma Viz Extension em uma planilha.');sheet=tableau.extensions.worksheetContent.worksheet;author=tableau.extensions.environment.mode==='authoring';config=readConfig();$('configure').hidden=!author;document.body.classList.toggle('authoring',author);render();sheet.addEventListener(tableau.TableauEventType.SummaryDataChanged,update);await update();}catch(err){dataMessage=String(err.message||err);render();$('notice').textContent=dataMessage;}}
