@@ -29,5 +29,5 @@ async function atualizarDados() {
 
 tableau.extensions.initializeAsync().then(() => {
     atualizarDados();
-    setInterval(atualizarDados, 30000);
+    setInterval(atualizarDados, 60000);
 });
