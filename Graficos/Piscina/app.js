@@ -148,43 +148,52 @@
     catch(err){if(previous===undefined)settings.erase('poolConfig');else settings.set('poolConfig',previous);$('saveStatus').textContent='Não foi possível salvar: '+String(err.message||err);}
     finally{saving=false;$('save').disabled=false;$('close').disabled=false;}
   }
+
+  // ===== ALTERAÇÃO DE DESEMPENHO =====
+  // Em visualização (SmartPedra/Tableau Cloud) os campos do cartão Marcas não mudam:
+  // a especificação visual é buscada uma única vez. Em edição, continua sendo lida sempre.
+  let specCache=null;
+  async function getSpec(){
+    if(!author&&specCache)return specCache;
+    const spec=await sheet.getVisualSpecificationAsync();
+    if(!author)specCache=spec;
+    return spec;
+  }
   async function readValue(){
-    const spec=await sheet.getVisualSpecificationAsync(),card=spec.marksSpecifications[spec.activeMarksSpecificationIndex];
+    const spec=await getSpec(),card=spec.marksSpecifications[spec.activeMarksSpecificationIndex];
     const encodings=card?card.encodings:[],fieldFor=id=>{const encoding=encodings.find(e=>e.id===id);return encoding&&encoding.field?encoding.field:null;};
     const valueField=fieldFor('value'),titleField=fieldFor('title'),labelField=fieldFor('label'),limit1Field=fieldFor('limit1');
     if(!valueField)return {value:null,name:'',dynamic:{title:null,label:null,limit1:null},message:'Arraste uma medida para a entrada Valor no cartão Marcas.'};
-    let reader;
-    try{
-      reader=await sheet.getSummaryDataReaderAsync(2,{ignoreSelection:true});
-      if(!reader.pageCount)return {value:null,name:valueField.name,dynamic:{title:null,label:null,limit1:null},message:'Sem dados para os filtros atuais.'};
-      const page=await reader.getPageAsync(0);
-      if(reader.pageCount>1||page.data.length>1)return {value:null,name:valueField.name,dynamic:{title:null,label:null,limit1:null},message:'A extensão recebeu mais de uma linha. Ajuste os filtros para deixar um único registro/valor.'};
-      if(!page.data.length)return {value:null,name:valueField.name,dynamic:{title:null,label:null,limit1:null},message:'Sem dados para os filtros atuais.'};
-      const row=page.data[0],cache=new Map();
-      function fieldValue(field,label,allowEmpty=false){
-        if(!field)return undefined;
-        if(!cache.has(field.name)){
-          const column=page.columns.find(c=>c.fieldName===field.name);
-          if(!column)throw new Error(`O campo ${label} (${field.name}) não foi encontrado nos dados da planilha.`);
-          const cell=row[column.index];cache.set(field.name,cell&&cell.value);
-        }
-        const value=cache.get(field.name);
-        if(value===null||value===undefined||value===''){if(allowEmpty)return '';throw new Error(`O campo ${label} está vazio para o registro filtrado.`);}
-        return value;
+    // Uma única chamada (antes: abrir leitor + ler página + liberar leitor)
+    const page=await sheet.getSummaryDataAsync({ignoreSelection:true,maxRows:2});
+    if(page.data.length>1)return {value:null,name:valueField.name,dynamic:{title:null,label:null,limit1:null},message:'A extensão recebeu mais de uma linha. Ajuste os filtros para deixar um único registro/valor.'};
+    if(!page.data.length)return {value:null,name:valueField.name,dynamic:{title:null,label:null,limit1:null},message:'Sem dados para os filtros atuais.'};
+    const row=page.data[0],cache=new Map();
+    function fieldValue(field,label,allowEmpty=false){
+      if(!field)return undefined;
+      if(!cache.has(field.name)){
+        const column=page.columns.find(c=>c.fieldName===field.name);
+        if(!column)throw new Error(`O campo ${label} (${field.name}) não foi encontrado nos dados da planilha.`);
+        const cell=row[column.index];cache.set(field.name,cell&&cell.value);
       }
-      const value=fieldValue(valueField,'Valor');
-      if(!finite(value))throw new Error('A medida da entrada Valor está nula ou não é numérica.');
-      const title=titleField?String(fieldValue(titleField,'Título',true)).trim():null;
-      const label=labelField?String(fieldValue(labelField,'Nome')).trim():null;
-      if(labelField&&!label)throw new Error('O campo Nome está vazio para o registro filtrado.');
-      let limit1=null;
-      if(limit1Field&&config.ranges.length>1){
-        const raw=fieldValue(limit1Field,'Limite da faixa 1');limit1=typeof raw==='number'?raw:Number(raw);
-        if(!finite(limit1)||limit1<=0||limit1>=config.ranges[1].end)throw new Error(`O limite da faixa 1 precisa ser maior que 0 e menor que ${number(config.ranges[1].end,2)}%.`);
-      }
-      return {value,name:valueField.name,dynamic:{title,label,limit1},message:''};
-    }finally{if(reader)await reader.releaseAsync();}
+      const value=cache.get(field.name);
+      if(value===null||value===undefined||value===''){if(allowEmpty)return '';throw new Error(`O campo ${label} está vazio para o registro filtrado.`);}
+      return value;
+    }
+    const value=fieldValue(valueField,'Valor');
+    if(!finite(value))throw new Error('A medida da entrada Valor está nula ou não é numérica.');
+    const title=titleField?String(fieldValue(titleField,'Título',true)).trim():null;
+    const label=labelField?String(fieldValue(labelField,'Nome')).trim():null;
+    if(labelField&&!label)throw new Error('O campo Nome está vazio para o registro filtrado.');
+    let limit1=null;
+    if(limit1Field&&config.ranges.length>1){
+      const raw=fieldValue(limit1Field,'Limite da faixa 1');limit1=typeof raw==='number'?raw:Number(raw);
+      if(!finite(limit1)||limit1<=0||limit1>=config.ranges[1].end)throw new Error(`O limite da faixa 1 precisa ser maior que 0 e menor que ${number(config.ranges[1].end,2)}%.`);
+    }
+    return {value,name:valueField.name,dynamic:{title,label,limit1},message:''};
   }
+  // ===== FIM DA ALTERAÇÃO =====
+
   async function update(){pending=true;if(running)return;running=true;try{while(pending){pending=false;try{const result=await readValue();current=result.value;fieldName=result.name;dynamic=result.dynamic||{title:null,label:null,limit1:null};dataMessage=result.message;}catch(err){current=null;dynamic={title:null,label:null,limit1:null};dataMessage='Não foi possível ler os campos da planilha: '+String(err.message||err);}if(!pending)render();}}finally{running=false;}}
   function syncColorControls(event){const preset=$('colorPresetInput').value;if(event&&palettes[preset])for(const [key,value] of Object.entries(palettes[preset]))$(`color${key[0].toUpperCase()}${key.slice(1)}Input`).value=value;const enabled=preset==='custom';for(const id of ['colorWallsInput','colorEmptyInput','colorEdgeInput','colorTitleInput','colorLabelInput'])$(id).disabled=!enabled;}
   $('colorPresetInput').addEventListener('change',syncColorControls);
