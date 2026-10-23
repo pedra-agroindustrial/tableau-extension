@@ -162,7 +162,7 @@
       if (visible) {
         if (style === 'dot') {
           const mark = document.createElementNS(ns, 'circle');
-          const markRadius = Math.max(1.2, Math.min(5, length / (major ? 4 : medium ? 6 : 8))); 
+          const markRadius = Math.max(1.2, Math.min(5, length / (major ? 4 : medium ? 6 : 8)));
           const midRadius = (outerRadius + innerRadius) / 2;
           mark.setAttribute('cx', cx + midRadius * Math.cos(radians));
           mark.setAttribute('cy', cy + midRadius * Math.sin(radians));
@@ -439,8 +439,19 @@
     }
   }
 
-  async function readValue() {
+  // ===== ALTERAÇÃO DE DESEMPENHO =====
+  // 1) Especificação visual em cache fora do modo de edição (SmartPedra/Tableau Cloud).
+  let specCache = null;
+  async function getSpec() {
+    if (!author && specCache) return specCache;
     const spec = await sheet.getVisualSpecificationAsync();
+    if (!author) specCache = spec;
+    return spec;
+  }
+
+  // 2) Leitura em uma única chamada (antes: abrir leitor + ler página + liberar leitor).
+  async function readValue() {
+    const spec = await getSpec();
     const card = spec.marksSpecifications[spec.activeMarksSpecificationIndex];
     const encodings = card ? card.encodings.filter(e => e.id === 'value') : [];
     const titleEncoding = card ? card.encodings.find(e => e.id === 'title') : null;
@@ -456,54 +467,45 @@
     }
 
     const field = encodings[0].field;
-    let reader;
+    const page = await sheet.getSummaryDataAsync({ ignoreSelection: true, maxRows: 2 });
 
-    try {
-      reader = await sheet.getSummaryDataReaderAsync(2, { ignoreSelection: true });
-      if (!reader.pageCount) {
-        return { value: null, name: field.name, title: null, info: '', message: 'Sem dados para os filtros atuais.' };
-      }
-
-      const page = await reader.getPageAsync(0);
-      if (reader.pageCount > 1 || page.data.length > 1) {
-        return {
-          value: null, name: field.name, title: null, info: '',
-          message: 'Há várias marcas. Remova dimensões de Detalhe/Linhas/Colunas e agregue a medida em um único valor (SUM, AVG, MAX...).'
-        };
-      }
-      if (!page.data.length) {
-        return { value: null, name: field.name, title: null, info: '', message: 'Sem dados para os filtros atuais.' };
-      }
-
-      const column = page.columns.find(c => c.fieldName === field.name);
-      if (!column) throw new Error('A medida da entrada Valor não foi encontrada nos dados da planilha.');
-
-      const cell = page.data[0][column.index];
-      const value = cell && cell.value;
-      let title = null;
-      if (titleField) {
-        const titleColumn = page.columns.find(c => c.fieldName === titleField.name);
-        if (!titleColumn) throw new Error(`O campo Título (${titleField.name}) não foi encontrado nos dados da planilha.`);
-        const titleCell = page.data[0][titleColumn.index];
-        const rawTitle = titleCell && titleCell.value;
-        title = rawTitle === null || rawTitle === undefined ? '' : String(rawTitle).trim();
-      }
-      let info = '';
-      if (infoField) {
-        const infoColumn = page.columns.find(c => c.fieldName === infoField.name);
-        if (!infoColumn) throw new Error(`O campo Informação (${infoField.name}) não foi encontrado nos dados da planilha.`);
-        const infoCell = page.data[0][infoColumn.index];
-        const rawInfo = infoCell && infoCell.value;
-        info = rawInfo === null || rawInfo === undefined ? '' : String(rawInfo).trim();
-      }
-      if (!finite(value)) {
-        return { value: null, name: field.name, title, info, message: 'A medida está nula ou não é numérica.' };
-      }
-      return { value, name: field.name, title, info, message: '' };
-    } finally {
-      if (reader) await reader.releaseAsync();
+    if (page.data.length > 1) {
+      return {
+        value: null, name: field.name, title: null, info: '',
+        message: 'Há várias marcas. Remova dimensões de Detalhe/Linhas/Colunas e agregue a medida em um único valor (SUM, AVG, MAX...).'
+      };
     }
+    if (!page.data.length) {
+      return { value: null, name: field.name, title: null, info: '', message: 'Sem dados para os filtros atuais.' };
+    }
+
+    const column = page.columns.find(c => c.fieldName === field.name);
+    if (!column) throw new Error('A medida da entrada Valor não foi encontrada nos dados da planilha.');
+
+    const cell = page.data[0][column.index];
+    const value = cell && cell.value;
+    let title = null;
+    if (titleField) {
+      const titleColumn = page.columns.find(c => c.fieldName === titleField.name);
+      if (!titleColumn) throw new Error(`O campo Título (${titleField.name}) não foi encontrado nos dados da planilha.`);
+      const titleCell = page.data[0][titleColumn.index];
+      const rawTitle = titleCell && titleCell.value;
+      title = rawTitle === null || rawTitle === undefined ? '' : String(rawTitle).trim();
+    }
+    let info = '';
+    if (infoField) {
+      const infoColumn = page.columns.find(c => c.fieldName === infoField.name);
+      if (!infoColumn) throw new Error(`O campo Informação (${infoField.name}) não foi encontrado nos dados da planilha.`);
+      const infoCell = page.data[0][infoColumn.index];
+      const rawInfo = infoCell && infoCell.value;
+      info = rawInfo === null || rawInfo === undefined ? '' : String(rawInfo).trim();
+    }
+    if (!finite(value)) {
+      return { value: null, name: field.name, title, info, message: 'A medida está nula ou não é numérica.' };
+    }
+    return { value, name: field.name, title, info, message: '' };
   }
+  // ===== FIM DA ALTERAÇÃO =====
 
   async function update() {
     pending = true;
