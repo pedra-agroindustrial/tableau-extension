@@ -1,624 +1,392 @@
 (() => {
   'use strict';
-
   const $ = id => document.getElementById(id);
+  const CONFIG_KEY = 'motorGridConfig';
+  const CONFIG_VERSION = 1;
+  const ARC_START = 144, ARC_SWEEP = 252;   // 70% da circunferência, igual ao velocímetro original
+  const defaultColors = {progress:'#2e9e44', track:'#d6e9da', needle:'#d81b3c', ticks:'#6b7480', title:'#1f2933', pill:'#e3f1e6', card:'#ffffff'};
+
   const defaults = {
-    maximum: 100, title: 'Velocímetro', unit: '%',
-    decimals: 1, theme: 'light', poolZoom: 120, fitMode: 'proportional',
-    fontTitle: 18, fontPercentage: 29, fontLabel: 20, arcPercent: 70, showUnit: true,
-    majorTickLength: 23, smallTickLength: 9, majorTickOffset: 0, smallTickOffset: 0, numberOffset: 0,
-    majorTickStyle: 'standard', smallTickStyle: 'standard', showMajorTicks: true, showSmallTicks: true,
-    design: 'modern', colorPreset: 'mono', useColorRanges: false, colorRanges: [],
-    colors: { progress: '#303030', track: '#e9e9e9', needle: '#303030', labels: '#686868', numbers: '#686868', title: '#686868', value: '#303030' }
+    version:CONFIG_VERSION,
+    showHeader:true, sectionTitle:'VELOCIDADE DO MOTOR', sectionSubtitle:'Rotação atual e corrente de operação', iconColor:'#1e8e3e',
+    columns:0, minCard:190, sort:'tableau', gap:10, maxCards:20,
+    maximum:100, decimals:1, unit:'%', fontValue:17, fontUnit:65,
+    infoSuffix:'A', infoDecimals:1, fontInfo:13, infoBold:false,
+    onThreshold:0, onText:'EM OPERAÇÃO', onColor:'#2e9e44', offText:'DESLIGADO', offColor:'#1b5e20',
+    extraStatus:'FALHA=#d32f2f', showStatus:true,
+    arcByStatus:true, shake:true,
+    showCard:true, uppercase:true, fontTitle:14,
+    colors:{...defaultColors}, theme:'light'
   };
 
-  let config = { ...defaults };
-  let sheet, author = false, saving = false, running = false, pending = false;
-  let current = null, fieldName = '', dataMessage = '', dynamicTitle = null, dynamicInfo = '', angle = 0;
-  let animation = null, trembleAnimation = null, resizeObserver = null;
-  const ns = 'http://www.w3.org/2000/svg';
-  const finite = n => typeof n === 'number' && Number.isFinite(n);
-  const validMax = n => finite(n) && n > 0;
+  let config = clone(defaults), sheet, author = false, saving = false, running = false, pending = false;
+  let items = [], globalMessage = '';
+  const cards = new Map();
+
+  function clone(o){ return JSON.parse(JSON.stringify(o)); }
   const validColor = c => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c);
-  const validColorRanges = ranges => Array.isArray(ranges) && ranges.length >= 1 && ranges.length <= 10 && ranges.every((r, i) => validColor(r.color) && finite(r.end) && r.end > (i ? ranges[i - 1].end : 0) && r.end <= 500);
-  const number = (n, decimals = config.decimals) =>
-    n.toLocaleString('pt-BR', { maximumFractionDigits: decimals });
+  const finite = n => typeof n === 'number' && Number.isFinite(n);
+  const fmt = (n, d) => n.toLocaleString('pt-BR', {minimumFractionDigits:d, maximumFractionDigits:d});
+  const intIn = (v, min, max, fb) => Number.isInteger(v) && v >= min && v <= max ? v : fb;
+  const numIn = (v, min, max, fb) => finite(v) && v >= min && v <= max ? v : fb;
+  const oneOf = (v, list, fb) => list.includes(v) ? v : fb;
+  const bool = (v, fb) => typeof v === 'boolean' ? v : fb;
+  const str = (v, max, fb) => typeof v === 'string' ? v.slice(0, max) : fb;
+  const errText = e => String((e && e.message) || e);
+  const isNull = v => v === null || v === undefined || v === '' || v === '%null%';
+  const norm = s => String(s).trim().toLocaleUpperCase('pt-BR');
 
-  const palettes = {
-    mono: { progress: '#303030', track: '#e9e9e9', needle: '#303030', labels: '#686868', numbers: '#686868', title: '#686868', value: '#303030' },
-    ocean: { progress: '#1976d2', track: '#dceaf7', needle: '#0d47a1', labels: '#476579', numbers: '#476579', title: '#476579', value: '#17324a' },
-    forest: { progress: '#2e7d32', track: '#e3eee4', needle: '#1b5e20', labels: '#526b54', numbers: '#526b54', title: '#526b54', value: '#213c25' },
-    sunset: { progress: '#e87516', track: '#f6ead9', needle: '#a84312', labels: '#735e4a', numbers: '#735e4a', title: '#735e4a', value: '#4b3527' },
-    violet: { progress: '#7c3aed', track: '#ece6f7', needle: '#4c1d95', labels: '#675c7e', numbers: '#675c7e', title: '#675c7e', value: '#35245a' },
-    redNeedle: { progress: '#303030', track: '#e6e6e6', needle: '#c51f32', labels: '#282828', numbers: '#282828', title: '#282828', value: '#151515' }
-  };
-
-  const cx = 300, cy = 220, radius = 190;
-  function innerEdgeRadius() {
-    return radius - (config.design === 'analog' ? 14 : config.design === 'minimal' ? 6 : config.design === 'realistic' ? 6 : 10);
-  }
-  function arcSweep() { return config.arcPercent * 3.6; }
-  function arcStart() { return 270 - arcSweep() / 2; }
-  function zeroAngle() { return arcStart() - 180; }
-  function pointOnArc(fraction, r = radius) {
-    const radians = (arcStart() + fraction * arcSweep()) * Math.PI / 180;
-    return [cx + r * Math.cos(radians), cy + r * Math.sin(radians)];
-  }
-  function arcPath() {
-    const [x1, y1] = pointOnArc(0), [x2, y2] = pointOnArc(1);
-    const largeArc = arcSweep() > 180 ? 1 : 0;
-    return `M ${x1.toFixed(2)} ${y1.toFixed(2)} A ${radius} ${radius} 0 ${largeArc} 1 ${x2.toFixed(2)} ${y2.toFixed(2)}`;
-  }
-  function calculateAngle(value) {
-    const fraction = Math.max(0, Math.min(1, value / config.maximum));
-    return zeroAngle() + fraction * arcSweep();
+  function parseExtraStatus(text){
+    const map = new Map(), bad = [];
+    String(text || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).forEach(line => {
+      const i = line.lastIndexOf('='), name = i > 0 ? line.slice(0, i).trim() : '', color = i > 0 ? line.slice(i + 1).trim() : '';
+      if (name && validColor(color)) map.set(norm(name), color); else bad.push(line);
+    });
+    return {map, bad};
   }
 
-  function readConfig() {
-    const raw = tableau.extensions.settings.get('gaugeConfig');
-    if (!raw) return { ...defaults };
-
-    try {
-      const c = JSON.parse(raw);
+  // ===== Configuração =====
+  // Campos novos (fontValue, fontUnit, fontInfo, infoBold) usam o padrão se não existirem:
+  // configurações salvas na v1.0 continuam valendo.
+  function readConfig(){
+    const raw = tableau.extensions.settings.get(CONFIG_KEY);
+    if (!raw) return clone(defaults);
+    try{
+      const c = JSON.parse(raw), d = clone(defaults);
+      if (c.version !== CONFIG_VERSION) return d;
       return {
-        maximum: validMax(c.maximum) ? ((typeof c.unit === 'string' && c.unit.trim().toLowerCase() === 'km/h') ? 100 : c.maximum) : defaults.maximum,
-        title: typeof c.title === 'string' ? c.title.slice(0, 80) : defaults.title,
-        unit: typeof c.unit === 'string' && c.unit.trim() ? (c.unit.trim().toLowerCase() === 'km/h' ? '%' : c.unit.slice(0, 24)) : defaults.unit,
-        decimals: Number.isInteger(c.decimals) && c.decimals >= 0 && c.decimals <= 3
-          ? c.decimals : 1,
-        theme: ['light', 'gray', 'transparent', 'dark'].includes(c.theme) ? c.theme : defaults.theme,
-        arcPercent: Number.isInteger(c.arcPercent) && c.arcPercent >= 50 && c.arcPercent <= 80 ? c.arcPercent : defaults.arcPercent,
-        poolZoom: Number.isInteger(c.poolZoom) && c.poolZoom >= 90 && c.poolZoom <= 125
-          ? c.poolZoom : defaults.poolZoom,
-        fitMode: ['proportional', 'fill'].includes(c.fitMode) ? c.fitMode : defaults.fitMode,
-        fontTitle: Number.isInteger(c.fontTitle) && c.fontTitle >= 10 && c.fontTitle <= 36
-          ? c.fontTitle : defaults.fontTitle,
-        fontPercentage: Number.isInteger(c.fontPercentage) && c.fontPercentage >= 16 && c.fontPercentage <= 48
-          ? c.fontPercentage : defaults.fontPercentage,
-        fontLabel: Number.isInteger(c.fontLabel) && c.fontLabel >= 12 && c.fontLabel <= 36
-          ? c.fontLabel : defaults.fontLabel,
-        showUnit: typeof c.showUnit === 'boolean' ? c.showUnit : defaults.showUnit,
-        majorTickLength: Number.isInteger(c.majorTickLength) && c.majorTickLength >= 8 && c.majorTickLength <= 30
-          ? (c.majorTickLength === 16 ? defaults.majorTickLength : c.majorTickLength) : defaults.majorTickLength,
-        smallTickLength: Number.isInteger(c.smallTickLength) && c.smallTickLength >= 4 && c.smallTickLength <= 28
-          ? (c.smallTickLength === 12 ? defaults.smallTickLength : c.smallTickLength) : defaults.smallTickLength,
-        majorTickOffset: Number.isInteger(c.majorTickOffset) && c.majorTickOffset >= -24 && c.majorTickOffset <= 24 ? c.majorTickOffset : defaults.majorTickOffset,
-        smallTickOffset: Number.isInteger(c.smallTickOffset) && c.smallTickOffset >= -24 && c.smallTickOffset <= 24 ? c.smallTickOffset : defaults.smallTickOffset,
-        numberOffset: Number.isInteger(c.numberOffset) && c.numberOffset >= -24 && c.numberOffset <= 24 ? c.numberOffset : defaults.numberOffset,
-        majorTickStyle: ['standard', 'thin', 'bold', 'dot'].includes(c.majorTickStyle) ? c.majorTickStyle : defaults.majorTickStyle,
-        smallTickStyle: ['standard', 'thin', 'bold', 'dot'].includes(c.smallTickStyle) ? c.smallTickStyle : defaults.smallTickStyle,
-        showMajorTicks: typeof c.showMajorTicks === 'boolean' ? c.showMajorTicks : defaults.showMajorTicks,
-        showSmallTicks: typeof c.showSmallTicks === 'boolean' ? c.showSmallTicks : defaults.showSmallTicks,
-        design: ['modern', 'minimal', 'analog', 'realistic'].includes(c.design) ? c.design : defaults.design,
-        colorPreset: ['mono', 'ocean', 'forest', 'sunset', 'violet', 'redNeedle', 'custom'].includes(c.colorPreset) ? c.colorPreset : defaults.colorPreset,
-        colors: Object.fromEntries(Object.entries(defaults.colors).map(([key, fallback]) => [key, validColor(c.colors?.[key]) ? c.colors[key] : fallback])),
-        useColorRanges: typeof c.useColorRanges === 'boolean' ? c.useColorRanges : defaults.useColorRanges,
-        colorRanges: Array.isArray(c.colorRanges) && validColorRanges(c.colorRanges.map(r => ({color:r.color,end:Number(r.end)}))) ? c.colorRanges.map(r => ({color:r.color,end:Number(r.end)})) : []
+        version:CONFIG_VERSION,
+        showHeader:bool(c.showHeader, d.showHeader), sectionTitle:str(c.sectionTitle, 60, d.sectionTitle),
+        sectionSubtitle:str(c.sectionSubtitle, 120, d.sectionSubtitle), iconColor:validColor(c.iconColor) ? c.iconColor : d.iconColor,
+        columns:intIn(c.columns, 0, 10, d.columns), minCard:intIn(c.minCard, 140, 500, d.minCard),
+        sort:oneOf(c.sort, ['tableau','alpha','onFirst','valueDesc'], d.sort),
+        gap:intIn(c.gap, 0, 32, d.gap), maxCards:intIn(c.maxCards, 1, 40, d.maxCards),
+        maximum:finite(c.maximum) && c.maximum > 0 ? c.maximum : d.maximum,
+        decimals:intIn(c.decimals, 0, 2, d.decimals), unit:str(c.unit, 12, d.unit),
+        fontValue:intIn(c.fontValue, 10, 40, d.fontValue), fontUnit:intIn(c.fontUnit, 40, 100, d.fontUnit),
+        infoSuffix:str(c.infoSuffix, 12, d.infoSuffix), infoDecimals:intIn(c.infoDecimals, 0, 2, d.infoDecimals),
+        fontInfo:intIn(c.fontInfo, 8, 30, d.fontInfo), infoBold:bool(c.infoBold, d.infoBold),
+        onThreshold:numIn(c.onThreshold, 0, 100, d.onThreshold),
+        onText:str(c.onText, 24, d.onText), onColor:validColor(c.onColor) ? c.onColor : d.onColor,
+        offText:str(c.offText, 24, d.offText), offColor:validColor(c.offColor) ? c.offColor : d.offColor,
+        extraStatus:str(c.extraStatus, 600, d.extraStatus), showStatus:bool(c.showStatus, d.showStatus),
+        arcByStatus:bool(c.arcByStatus, d.arcByStatus), shake:bool(c.shake, d.shake),
+        showCard:bool(c.showCard, d.showCard), uppercase:bool(c.uppercase, d.uppercase), fontTitle:intIn(c.fontTitle, 9, 24, d.fontTitle),
+        colors:Object.fromEntries(Object.keys(defaultColors).map(k => [k, validColor(c.colors?.[k]) ? c.colors[k] : d.colors[k]])),
+        theme:oneOf(c.theme, ['light','gray','transparent','dark'], d.theme)
       };
-    } catch (_) {
-      return { ...defaults };
+    }catch(_){ return clone(defaults); }
+  }
+
+  // ===== Regras =====
+  const pctOf = item => finite(item.value) ? item.value / config.maximum * 100 : null;
+  function statusOf(item){
+    const pct = pctOf(item), on = pct !== null && pct > config.onThreshold;
+    if (item.status !== null){            // texto vindo do campo Status
+      const key = norm(item.status), extra = parseExtraStatus(config.extraStatus).map;
+      let color = extra.get(key);
+      if (!color) color = key === norm(config.onText) ? config.onColor : key === norm(config.offText) ? config.offColor : (on ? config.onColor : config.offColor);
+      return {text:item.status, color, on};
     }
+    if (pct === null) return {text:'SEM DADOS', color:'#9aa3ab', on:false};
+    return on ? {text:config.onText, color:config.onColor, on:true} : {text:config.offText, color:config.offColor, on:false};
+  }
+  function sortItems(list){
+    const out = list.slice();
+    const byName = (a, b) => a.title.localeCompare(b.title, 'pt-BR', {numeric:true, sensitivity:'base'});
+    const val = x => finite(x.value) ? x.value : -Infinity;
+    if (config.sort === 'alpha') out.sort(byName);
+    if (config.sort === 'valueDesc') out.sort((a, b) => (val(b) - val(a)) || byName(a, b));
+    if (config.sort === 'onFirst') out.sort((a, b) => (Number(statusOf(b).on) - Number(statusOf(a).on)) || byName(a, b));
+    return out;
   }
 
-  function setNeedleAngle(value) {
-    $('needle').setAttribute('transform', `rotate(${value} ${cx} ${cy})`);
+  // Posição vertical do valor e da informação conforme o tamanho das fontes,
+  // para que não se sobreponham; a área do desenho cresce para baixo se precisar.
+  function textLayout(){
+    const valueY = 146 + config.fontValue * 0.9;
+    const infoY = valueY + config.fontInfo * 0.95 + 7;
+    const bottom = Math.max(204, infoY + config.fontInfo * 0.3 + 4);
+    return {valueY, infoY, viewBox:`20 8 260 ${(bottom - 8).toFixed(1)}`};
   }
 
-  function animateNeedleTremble(target) {
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const tick = t => {
-      const wobble = Math.sin(t * 0.045) * 0.45 + Math.sin(t * 0.079) * 0.16;
-      setNeedleAngle(target + wobble);
-      trembleAnimation = requestAnimationFrame(tick);
-    };
-    trembleAnimation = requestAnimationFrame(tick);
+  // ===== Cartões =====
+  function createCard(){
+    const node = $('cardTemplate').content.firstElementChild.cloneNode(true);
+    const q = s => node.querySelector(s);
+    return {node, title:q('.title'), svg:q('.gauge'), progress:q('.progress'), needle:q('.needle-pos'),
+      valueText:q('.value-text'), v:q('.v'), u:q('.u'), info:q('.info-text'), statusText:q('.status-text'), error:q('.card-error'), lastAngle:ARC_START};
   }
 
-  function moveNeedle(target, trembling = false) {
-    if (animation !== null) cancelAnimationFrame(animation);
-    if (trembleAnimation !== null) cancelAnimationFrame(trembleAnimation);
-    trembleAnimation = null;
-    const initial = angle;
-    const start = performance.now();
-    const reducingSpeed = target < initial;
-    const duration = matchMedia('(prefers-reduced-motion: reduce)').matches
-      ? 0 : reducingSpeed ? 750 : 450;
+  function paintCard(c, item, tl){
+    const pct = pctOf(item), has = pct !== null, st = statusOf(item);
+    const frac = has ? Math.max(0, Math.min(1, pct / 100)) : 0;
+    c.title.textContent = item.title; c.title.title = item.title;
 
-    function frame(t) {
-      const p = duration ? Math.min(1, (t - start) / duration) : 1;
-      const eased = reducingSpeed
-        ? 0.5 - 0.5 * Math.cos(Math.PI * p)
-        : 1 - Math.pow(1 - p, 3);
-      angle = initial + (target - initial) * eased;
-      setNeedleAngle(angle);
-      if (p < 1) animation = requestAnimationFrame(frame);
-      else {
-        angle = target;
-        if (trembling) animateNeedleTremble(target);
-      }
-    }
-    animation = requestAnimationFrame(frame);
+    c.svg.setAttribute('viewBox', tl.viewBox);
+    c.valueText.setAttribute('y', tl.valueY.toFixed(1));
+    c.info.setAttribute('y', tl.infoY.toFixed(1));
+
+    const angle = ARC_START + frac * ARC_SWEEP;
+    c.node.classList.toggle('down', angle < c.lastAngle);   // descida mais suave, como no velocímetro original
+    c.node.style.setProperty('--angle', angle.toFixed(2) + 'deg');
+    c.lastAngle = angle;
+    c.progress.style.strokeDasharray = `${(frac * 100).toFixed(2)} 100`;
+    c.node.style.setProperty('--arc', config.arcByStatus ? st.color : config.colors.progress);
+
+    c.node.classList.toggle('no-data', !has);
+    c.node.classList.toggle('on', has && st.on && frac > 0);
+    c.v.textContent = has ? fmt(item.value, config.decimals) : '—';
+    c.u.textContent = has ? config.unit : '';
+
+    const inf = item.info;
+    c.info.textContent = inf === null ? '' : typeof inf === 'number' ? [fmt(inf, config.infoDecimals), config.infoSuffix].filter(Boolean).join(' ') : String(inf);
+
+    c.node.style.setProperty('--status', st.color);
+    c.statusText.textContent = st.text;
+
+    let err = item.error;
+    if (!err && has && (pct > 100 || pct < 0)) err = pct > 100 ? 'Acima do máximo da escala.' : 'Valor abaixo de zero.';
+    c.error.textContent = err || ''; c.error.hidden = !err;
+    c.node.classList.toggle('has-error', !!item.error);
+    c.svg.setAttribute('aria-label', has ? `${item.title}: ${fmt(item.value, config.decimals)} ${config.unit}, ${st.text}` : `${item.title}: sem dados`);
   }
 
-  function renderTicks() {
-    $('ticks').replaceChildren();
-    if (!validMax(config.maximum)) return;
-    const realistic = config.design === 'realistic';
-    const divisions = 40;
-    const step = 4;
-    for (let i = 0; i <= divisions; i++) {
-      const fraction = i / divisions;
-      const radians = (arcStart() + fraction * arcSweep()) * Math.PI / 180;
-      const major = i % step === 0;
-      const medium = !major && i % 2 === 0;
-      const visible = major ? config.showMajorTicks : config.showSmallTicks;
-      const offset = major ? config.majorTickOffset : config.smallTickOffset;
-      const style = major ? config.majorTickStyle : config.smallTickStyle;
-      const smallLength = Math.min(config.smallTickLength, config.majorTickLength);
-      const length = major ? config.majorTickLength : medium
-        ? Math.round(smallLength + (config.majorTickLength - smallLength) * 0.43) : smallLength;
-      const outerRadius = radius - 13 + offset;
-      const innerRadius = outerRadius - length;
-      if (visible) {
-        if (style === 'dot') {
-          const mark = document.createElementNS(ns, 'circle');
-          const markRadius = Math.max(1.2, Math.min(5, length / (major ? 4 : medium ? 6 : 8)));
-          const midRadius = (outerRadius + innerRadius) / 2;
-          mark.setAttribute('cx', cx + midRadius * Math.cos(radians));
-          mark.setAttribute('cy', cy + midRadius * Math.sin(radians));
-          mark.setAttribute('r', markRadius);
-          mark.setAttribute('class', `tick-dot ${major ? 'major' : medium ? 'medium' : 'minor'}`);
-          $('ticks').append(mark);
-        } else {
-          const line = document.createElementNS(ns, 'line');
-          line.setAttribute('x1', cx + outerRadius * Math.cos(radians));
-          line.setAttribute('y1', cy + outerRadius * Math.sin(radians));
-          line.setAttribute('x2', cx + innerRadius * Math.cos(radians));
-          line.setAttribute('y2', cy + innerRadius * Math.sin(radians));
-          line.setAttribute('class', `${major ? 'major' : medium ? 'medium' : 'minor'} style-${style}`);
-          const width = style === 'thin' ? (major ? 1.6 : medium ? 1.1 : 0.8)
-            : style === 'bold' ? (major ? 5.5 : medium ? 3.4 : 2.4)
-            : (major ? 4 : medium ? 2.4 : 1.5);
-          line.setAttribute('stroke-width', String(width));
-          $('ticks').append(line);
-        }
-      }
-      if (major) {
-        const label = document.createElementNS(ns, 'text');
-        const labelRadius = (realistic ? radius - 54 : 151) + config.numberOffset;
-        label.setAttribute('x', cx + labelRadius * Math.cos(radians));
-        label.setAttribute('y', cy + labelRadius * Math.sin(radians) + 5);
-        label.style.fontSize = `${16 / (config.poolZoom / 100)}px`;
-        label.textContent = number(config.maximum * fraction, realistic ? 0 : tickDecimals()) + (config.unit === '%' ? '%' : '');
-        $('ticks').append(label);
-      }
-    }
+  function applyGlobalStyle(){
+    const body = document.body, root = document.documentElement, col = config.colors;
+    const set = (k, v) => root.style.setProperty(k, v);
+    for (const [k, v] of Object.entries(col)) set('--' + k, v);
+    set('--icon', config.iconColor); set('--fs-title', config.fontTitle + 'px'); set('--gap', config.gap + 'px');
+    set('--fs-value', config.fontValue + 'px');
+    set('--fs-unit', (config.fontValue * config.fontUnit / 100).toFixed(1) + 'px');
+    set('--fs-info', config.fontInfo + 'px');
+    set('--info-weight', config.infoBold ? '700' : '400');
+    for (const t of ['gray','transparent','dark']){ root.classList.toggle(t, config.theme === t); body.classList.toggle(t, config.theme === t); }
+    body.classList.toggle('card-on', config.showCard); body.classList.toggle('card-off', !config.showCard);
+    body.classList.toggle('header-off', !config.showHeader);
+    body.classList.toggle('status-off', !config.showStatus);
+    body.classList.toggle('shake-on', config.shake);
+    body.classList.toggle('upper', config.uppercase);
+    $('sectionTitle').textContent = config.sectionTitle;
+    $('sectionSubtitle').textContent = config.sectionSubtitle;
   }
 
-  function tickDecimals() {
-    const step = config.maximum / 10;
-    return Number.isInteger(step) ? 0 : Math.min(2, Math.max(1, config.decimals));
+  function layout(){
+    const grid = $('grid'), n = grid.children.length;
+    if (!n) return;
+    const w = grid.clientWidth, h = grid.clientHeight, gap = config.gap;
+    let cols = config.columns || Math.max(1, Math.floor((w + gap) / (config.minCard + gap)));
+    cols = Math.min(cols, n);
+    const rows = Math.ceil(n / cols);
+    grid.style.setProperty('--cols', cols); grid.style.setProperty('--rows', rows);
+    const cw = (w - gap * (cols - 1)) / cols, ch = (h - gap * (rows - 1)) / rows;
+    for (const el of grid.children) el.classList.toggle('compact', cw < 160 || ch < 150);
+    const titles = [...grid.querySelectorAll('.title')];
+    let size = config.fontTitle;
+    const setSize = s => titles.forEach(t => { t.style.fontSize = s + 'px'; });
+    setSize(size);
+    while (size > 10 && titles.some(t => t.scrollWidth > t.clientWidth + 1)){ size -= 0.5; setSize(size); }
   }
 
-  function render() {
-    for (const theme of ['gray', 'transparent', 'dark']) {
-      document.documentElement.classList.toggle(theme, config.theme === theme);
-      document.body.classList.toggle(theme, config.theme === theme);
-    }
-    document.body.dataset.design = config.design;
-    const colors = config.colorPreset === 'custom' ? config.colors : palettes[config.colorPreset] || palettes.mono;
-    for (const [key, value] of Object.entries(colors)) document.body.style.setProperty(`--gauge-${key}`, value);
-    const zoom = config.poolZoom / 100;
-    const viewWidth = 600 / zoom, viewHeight = 500 / zoom;
-    const viewTop = config.design === 'realistic' ? cy - viewHeight / 2 : (500 - viewHeight) / 2;
-    $('gauge').setAttribute('viewBox', `${(600 - viewWidth) / 2} ${viewTop} ${viewWidth} ${viewHeight}`);
-    const path = arcPath();
-    $('track').setAttribute('d', path);
-    $('progress').setAttribute('d', path);
-    $('gauge').setAttribute('preserveAspectRatio', config.fitMode === 'fill' ? 'none' : 'xMidYMid meet');
-    $('realisticDecor').style.display = config.design === 'realistic' ? '' : 'none';
-    $('realisticSideHubs').style.display = config.design === 'realistic' ? '' : 'none';
-    $('needlePivot').setAttribute('r', config.design === 'realistic' ? '24' : '12');
-    $('needle').classList.toggle('needle-style-realistic', config.design === 'realistic');
-    $('needle').classList.toggle('needle-style-analog', config.design === 'analog');
-    $('needle').classList.toggle('needle-style-modern', config.design !== 'realistic' && config.design !== 'analog');
-    $('value').setAttribute('y', config.design === 'realistic' ? '330' : '280');
-    $('unitLabel').setAttribute('y', config.design === 'realistic' ? '366' : '315');
-    $('title').textContent = dynamicTitle !== null ? dynamicTitle : (config.title || fieldName || 'Velocímetro');
-    $('title').style.display = dynamicTitle === '' ? 'none' : '';
-    $('title').style.fontSize = `${config.fontTitle}px`;
-    $('value').style.fontSize = `${config.fontPercentage / zoom}px`;
-    $('unitLabel').textContent = config.showUnit ? config.unit : '';
-    $('unitLabel').style.fontSize = `${config.fontLabel / zoom}px`;
-    $('infoLabel').textContent = dynamicInfo;
-    $('infoLabel').style.display = dynamicInfo ? '' : 'none';
-    $('infoLabel').style.fontSize = `${config.fontLabel / zoom}px`;
-    $('infoLabel').setAttribute('y', config.design === 'realistic' ? (config.showUnit ? '398' : '366') : (config.showUnit ? '355' : '320'));
-    renderTicks();
-
-    const hasValue = finite(current);
-    const usable = hasValue && validMax(config.maximum);
-    $('value').textContent = hasValue ? number(current) : '—';
-    $('unitLabel').textContent = config.showUnit ? config.unit : '';
-    let progressColor = colors.progress;
-    if (usable && config.useColorRanges && config.colorRanges.length) {
-      const percent = Math.max(0, current / config.maximum * 100);
-      let rangeIndex = config.colorRanges.findIndex((range, i) => percent < range.end || i === config.colorRanges.length - 1);
-      if (rangeIndex < 0) rangeIndex = config.colorRanges.length - 1;
-      progressColor = config.colorRanges[rangeIndex].color;
-    }
-    $('progress').style.stroke = progressColor;
-    $('progress').style.strokeDasharray = `${usable ? Math.min(1, Math.max(0, current / config.maximum)) * 100 : 0} 100`;
-    $('needle').style.visibility = usable ? 'visible' : 'hidden';
-    moveNeedle(usable ? calculateAngle(current) : zeroAngle(), usable && current > 0);
-
-    let message = !validMax(config.maximum)
-      ? 'Defina e salve o máximo no modo de edição.'
-      : dataMessage;
-    if (usable && current > config.maximum) message = 'Valor acima do máximo da escala.';
-    if (usable && current < 0) message = 'Valor abaixo de zero.';
-
-    $('notice').textContent = message;
-    $('gauge').setAttribute(
-      'aria-label',
-      hasValue
-        ? `${fieldName || 'Valor'}: ${number(current)}${config.showUnit ? ` ${config.unit}` : ''}. Escala de 0 a ${config.maximum ?? 'não configurado'}. ${message}`
-        : message || 'Sem dados'
-    );
+  function render(){
+    applyGlobalStyle();
+    const grid = $('grid'), tl = textLayout();
+    const visible = sortItems(items).slice(0, config.maxCards);
+    const keep = new Set(visible.map(i => i.key));
+    for (const [k, c] of cards) if (!keep.has(k)){ c.node.remove(); cards.delete(k); }
+    visible.forEach((item, idx) => {
+      let c = cards.get(item.key);
+      if (!c){ c = createCard(); cards.set(item.key, c); }
+      try{ paintCard(c, item, tl); }
+      catch(e){ c.error.textContent = 'Erro ao desenhar: ' + errText(e); c.error.hidden = false; }
+      if (grid.children[idx] !== c.node) grid.insertBefore(c.node, grid.children[idx] || null);
+    });
+    let msg = globalMessage;
+    if (!msg && items.length > config.maxCards) msg = `Exibindo ${config.maxCards} de ${items.length} motores. Aumente "Máximo de cartões" ou filtre no Tableau.`;
+    $('notice').textContent = msg;
+    layout();
   }
 
-  function gaugeRangesFromForm() {
-    return [...$('gaugeRangesContainer').querySelectorAll('.range-row')]
-      .map(row => ({ color: row.querySelector('.range-color').value, end: Number(row.querySelector('.range-end').value) }));
+  // ===== Painel =====
+  const colorIds = {progress:'colorProgressInput', track:'colorTrackInput', needle:'colorNeedleInput', ticks:'colorTicksInput', title:'colorTitleInput', pill:'colorPillInput', card:'colorCardInput'};
+  const outputs = [['gapInput','gapValue',' px'],['fontTitleInput','fontTitleValue',' px'],
+    ['fontValueInput','fontValueValue',' px'],['fontUnitInput','fontUnitValue','%'],['fontInfoInput','fontInfoValue',' px']];
+  function updateOutputs(){ for (const [i, o, s] of outputs) $(o).textContent = $(i).value + s; }
+  function syncModes(){
+    $('minCardInput').disabled = $('columnsInput').value !== '0';
+    $('colorProgressInput').disabled = $('arcByStatusInput').checked;
   }
 
-  function renderGaugeRangeEditor(ranges) {
-    $('gaugeRangesContainer').innerHTML = ranges.map((range, i) => {
-      const start = i ? ranges[i - 1].end : 0;
-      return `<fieldset class="range-row"><legend>Faixa ${i + 1}</legend><label>Cor<input class="range-color" type="color" value="${range.color}"></label><div class="range-bounds"><label>De (%)<input class="range-start" type="number" value="${start}" readonly></label><label>Até (%)<input class="range-end" type="number" min="${start}" max="500" step="0.1" value="${range.end}"></label></div><button class="remove-range" type="button" ${ranges.length === 1 ? 'disabled' : ''}>Remover faixa</button></fieldset>`;
-    }).join('');
-    $('addGaugeRange').disabled = ranges.length >= 10;
-    $('gaugeRangesContainer').querySelectorAll('.remove-range').forEach(button => button.addEventListener('click', () => {
-      const currentRanges = gaugeRangesFromForm();
-      if (!validColorRanges(currentRanges)) { $('saveStatus').textContent = 'Ajuste os limites das faixas em ordem crescente antes de remover.'; return; }
-      const last = currentRanges[currentRanges.length - 1].end;
-      currentRanges.splice([...$('gaugeRangesContainer').querySelectorAll('.remove-range')].indexOf(button), 1);
-      currentRanges[currentRanges.length - 1].end = last;
-      renderGaugeRangeEditor(currentRanges);
-    }));
-    $('gaugeRangesContainer').querySelectorAll('.range-end').forEach(input => input.addEventListener('input', () => {
-      let start = 0;
-      $('gaugeRangesContainer').querySelectorAll('.range-row').forEach(row => {
-        row.querySelector('.range-start').value = String(start);
-        row.querySelector('.range-end').min = String(start);
-        start = Number(row.querySelector('.range-end').value);
-      });
-    }));
-  }
-
-  function addGaugeRange() {
-    const ranges = gaugeRangesFromForm();
-    if (!validColorRanges(ranges)) { $('saveStatus').textContent = 'Ajuste os limites das faixas em ordem crescente antes de adicionar outra.'; return; }
-    if (ranges.length >= 10) return;
-    const end = ranges[ranges.length - 1].end;
-    const start = ranges.length > 1 ? ranges[ranges.length - 2].end : 0;
-    const split = Math.round(((start + end) / 2) * 10) / 10;
-    if (split <= start || split >= end) { $('saveStatus').textContent = 'Não há espaço entre os limites para adicionar uma faixa.'; return; }
-    ranges[ranges.length - 1].end = split;
-    const colors = ['#ffb300', '#43a047', '#1e88e5', '#8e24aa', '#00acc1', '#f4511e', '#3949ab', '#7cb342', '#6d4c41'];
-    ranges.push({ color: colors[(ranges.length - 1) % colors.length], end });
-    renderGaugeRangeEditor(ranges);
-    $('saveStatus').textContent = '';
-  }
-
-  function openConfig() {
+  function openConfig(){
     if (!author || saving) return;
-    $('maxInput').value = config.maximum ?? '';
-    $('titleInput').value = config.title;
-    $('unitInput').value = config.unit;
-    $('decimalsInput').value = String(config.decimals);
-    $('themeInput').value = config.theme;
-    $('useColorRangesInput').checked = config.useColorRanges;
-    const initialRangeColor = (config.colorPreset === 'custom' ? config.colors : palettes[config.colorPreset] || palettes.mono).progress;
-    renderGaugeRangeEditor(config.colorRanges.length ? config.colorRanges.map(r => ({...r})) : [{color:initialRangeColor,end:100}]);
-    $('colorRangesPanel').hidden = !config.useColorRanges;
-    $('poolZoomInput').value = String(config.poolZoom);
-    $('fitModeInput').value = config.fitMode;
-    $('fontTitleInput').value = String(config.fontTitle);
-    $('fontPercentageInput').value = String(config.fontPercentage);
-    $('fontLabelInput').value = String(config.fontLabel);
-    $('showUnitInput').checked = config.showUnit;
-    $('majorTickLengthInput').value = String(config.majorTickLength);
-    $('smallTickLengthInput').value = String(config.smallTickLength);
-    $('majorTickOffsetInput').value = String(config.majorTickOffset);
-    $('smallTickOffsetInput').value = String(config.smallTickOffset);
-    $('numberOffsetInput').value = String(config.numberOffset);
-    $('majorTickStyleInput').value = config.majorTickStyle;
-    $('smallTickStyleInput').value = config.smallTickStyle;
-    $('showMajorTicksInput').checked = config.showMajorTicks;
-    $('showSmallTicksInput').checked = config.showSmallTicks;
-    $('designInput').value = config.design;
-    $('colorPresetInput').value = config.colorPreset;
-    for (const key of Object.keys(config.colors)) $(`color${key[0].toUpperCase()}${key.slice(1)}Input`).value = config.colors[key];
-    syncColorControls();
-    $('arcPercentInput').value = String(config.arcPercent);
-    updateSizeOutputs();
-    $('saveStatus').textContent = '';
-    $('settingsPanel').hidden = false;
+    const c = config;
+    $('showHeaderInput').checked = c.showHeader; $('sectionTitleInput').value = c.sectionTitle;
+    $('sectionSubtitleInput').value = c.sectionSubtitle; $('iconColorInput').value = c.iconColor;
+    $('columnsInput').value = String(c.columns); $('minCardInput').value = String(c.minCard);
+    $('sortInput').value = c.sort; $('gapInput').value = String(c.gap); $('maxCardsInput').value = String(c.maxCards);
+    $('maximumInput').value = String(c.maximum); $('decimalsInput').value = String(c.decimals); $('unitInput').value = c.unit;
+    $('fontValueInput').value = String(c.fontValue); $('fontUnitInput').value = String(c.fontUnit);
+    $('infoSuffixInput').value = c.infoSuffix; $('infoDecimalsInput').value = String(c.infoDecimals);
+    $('fontInfoInput').value = String(c.fontInfo); $('infoBoldInput').checked = c.infoBold;
+    $('onThresholdInput').value = String(c.onThreshold);
+    $('onTextInput').value = c.onText; $('onColorInput').value = c.onColor;
+    $('offTextInput').value = c.offText; $('offColorInput').value = c.offColor;
+    $('extraStatusInput').value = c.extraStatus; $('showStatusInput').checked = c.showStatus;
+    $('arcByStatusInput').checked = c.arcByStatus; $('shakeInput').checked = c.shake;
+    for (const [k, id] of Object.entries(colorIds)) $(id).value = c.colors[k];
+    $('showCardInput').checked = c.showCard; $('uppercaseInput').checked = c.uppercase;
+    $('fontTitleInput').value = String(c.fontTitle); $('themeInput').value = c.theme;
+    updateOutputs(); syncModes();
+    $('saveStatus').textContent = ''; $('settingsPanel').hidden = false; document.body.classList.add('configuring');
   }
+  function closeConfig(){ $('settingsPanel').hidden = true; document.body.classList.remove('configuring'); }
 
-  async function saveConfig(e) {
-    e.preventDefault();
-    if (!author || saving) return;
-
-    const raw = $('maxInput').value.trim();
-    const max = /^\d+(?:[.,]\d+)?$/.test(raw)
-      ? Number(raw.replace(',', '.')) : NaN;
-
-    if (!validMax(max)) {
-      $('saveStatus').textContent =
-        'Informe um máximo maior que zero, sem separador de milhares (ex.: 1500 ou 1500,5).';
-      return;
-    }
-
+  async function saveConfig(e){
+    e.preventDefault(); if (!author || saving) return;
+    const num = id => Number(String($(id).value).replace(',', '.'));
     const candidate = {
-      maximum: max,
-      title: $('titleInput').value.trim(),
-      unit: $('unitInput').value.trim(),
-      decimals: Number($('decimalsInput').value),
-      theme: $('themeInput').value,
-      poolZoom: Number($('poolZoomInput').value),
-      fitMode: $('fitModeInput').value,
-      fontTitle: Number($('fontTitleInput').value),
-      fontPercentage: Number($('fontPercentageInput').value),
-      fontLabel: Number($('fontLabelInput').value),
-      showUnit: $('showUnitInput').checked,
-      majorTickLength: Number($('majorTickLengthInput').value),
-      smallTickLength: Number($('smallTickLengthInput').value),
-      majorTickOffset: Number($('majorTickOffsetInput').value),
-      smallTickOffset: Number($('smallTickOffsetInput').value),
-      numberOffset: Number($('numberOffsetInput').value),
-      majorTickStyle: $('majorTickStyleInput').value,
-      smallTickStyle: $('smallTickStyleInput').value,
-      showMajorTicks: $('showMajorTicksInput').checked,
-      showSmallTicks: $('showSmallTicksInput').checked,
-      design: $('designInput').value,
-      colorPreset: $('colorPresetInput').value,
-      useColorRanges: $('useColorRangesInput').checked,
-      colorRanges: gaugeRangesFromForm(),
-      colors: {
-        progress: $('colorProgressInput').value, track: $('colorTrackInput').value,
-        needle: $('colorNeedleInput').value, labels: $('colorLabelsInput').value, numbers: $('colorNumbersInput').value, title: $('colorTitleInput').value, value: $('colorValueInput').value
-      },
-      arcPercent: Number($('arcPercentInput').value)
+      version:CONFIG_VERSION,
+      showHeader:$('showHeaderInput').checked, sectionTitle:$('sectionTitleInput').value.trim(),
+      sectionSubtitle:$('sectionSubtitleInput').value.trim(), iconColor:$('iconColorInput').value,
+      columns:Number($('columnsInput').value), minCard:Number($('minCardInput').value),
+      sort:$('sortInput').value, gap:Number($('gapInput').value), maxCards:Number($('maxCardsInput').value),
+      maximum:num('maximumInput'), decimals:Number($('decimalsInput').value), unit:$('unitInput').value.trim(),
+      fontValue:Number($('fontValueInput').value), fontUnit:Number($('fontUnitInput').value),
+      infoSuffix:$('infoSuffixInput').value.trim(), infoDecimals:Number($('infoDecimalsInput').value),
+      fontInfo:Number($('fontInfoInput').value), infoBold:$('infoBoldInput').checked,
+      onThreshold:num('onThresholdInput'),
+      onText:$('onTextInput').value.trim(), onColor:$('onColorInput').value,
+      offText:$('offTextInput').value.trim(), offColor:$('offColorInput').value,
+      extraStatus:$('extraStatusInput').value.trim(), showStatus:$('showStatusInput').checked,
+      arcByStatus:$('arcByStatusInput').checked, shake:$('shakeInput').checked,
+      colors:Object.fromEntries(Object.entries(colorIds).map(([k, id]) => [k, $(id).value])),
+      showCard:$('showCardInput').checked, uppercase:$('uppercaseInput').checked,
+      fontTitle:Number($('fontTitleInput').value), theme:$('themeInput').value
     };
+    const fail = m => { $('saveStatus').textContent = m; };
+    if (!finite(candidate.maximum) || candidate.maximum <= 0) return fail('O máximo da escala precisa ser maior que zero.');
+    if (!finite(candidate.onThreshold) || candidate.onThreshold < 0 || candidate.onThreshold > 100) return fail('O limite de ligado precisa estar entre 0 e 100.');
+    if (!Number.isInteger(candidate.minCard) || candidate.minCard < 140 || candidate.minCard > 500) return fail('Largura mínima do cartão: entre 140 e 500.');
+    if (!Number.isInteger(candidate.maxCards) || candidate.maxCards < 1 || candidate.maxCards > 40) return fail('Máximo de cartões: entre 1 e 40.');
+    const bad = parseExtraStatus(candidate.extraStatus).bad;
+    if (bad.length) return fail(`Linha inválida em "Outros status": ${bad[0]} (use TEXTO=#rrggbb).`);
 
-    if (!Number.isInteger(candidate.poolZoom) || candidate.poolZoom < 90 || candidate.poolZoom > 125 ||
-        !['proportional', 'fill'].includes(candidate.fitMode) ||
-        !Number.isInteger(candidate.fontTitle) || candidate.fontTitle < 10 || candidate.fontTitle > 36 ||
-        !Number.isInteger(candidate.fontPercentage) || candidate.fontPercentage < 16 || candidate.fontPercentage > 48 ||
-        !Number.isInteger(candidate.fontLabel) || candidate.fontLabel < 12 || candidate.fontLabel > 36 ||
-        !Number.isInteger(candidate.majorTickLength) || candidate.majorTickLength < 8 || candidate.majorTickLength > 30 ||
-        !Number.isInteger(candidate.smallTickLength) || candidate.smallTickLength < 4 || candidate.smallTickLength > 28 ||
-        !Number.isInteger(candidate.majorTickOffset) || candidate.majorTickOffset < -24 || candidate.majorTickOffset > 24 ||
-        !Number.isInteger(candidate.smallTickOffset) || candidate.smallTickOffset < -24 || candidate.smallTickOffset > 24 ||
-        !Number.isInteger(candidate.numberOffset) || candidate.numberOffset < -24 || candidate.numberOffset > 24 ||
-        !['standard', 'thin', 'bold', 'dot'].includes(candidate.majorTickStyle) ||
-        !['standard', 'thin', 'bold', 'dot'].includes(candidate.smallTickStyle) ||
-        !['modern', 'minimal', 'analog', 'realistic'].includes(candidate.design) ||
-        !['mono', 'ocean', 'forest', 'sunset', 'violet', 'redNeedle', 'custom'].includes(candidate.colorPreset) ||
-        !Object.values(candidate.colors).every(validColor) ||
-        (candidate.useColorRanges && !validColorRanges(candidate.colorRanges)) ||
-        !Number.isInteger(candidate.arcPercent) || candidate.arcPercent < 50 || candidate.arcPercent > 80) {
-      $('saveStatus').textContent = 'Confira o arco, as fontes, os traços e, se ativadas, as faixas de cor em ordem crescente até 500%.';
-      return;
-    }
-
-    const settings = tableau.extensions.settings;
-    const previous = settings.get('gaugeConfig');
-    saving = true;
-    $('save').disabled = true;
-    $('close').disabled = true;
-    $('saveStatus').textContent = 'Salvando…';
-
-    try {
-      settings.set('gaugeConfig', JSON.stringify(candidate));
-      await settings.saveAsync();
-      config = candidate;
-      render();
-      $('saveStatus').textContent =
-        'Configuração salva. Salve/publique a pasta de trabalho para preservá-la.';
-    } catch (err) {
-      if (previous === undefined) settings.erase('gaugeConfig');
-      else settings.set('gaugeConfig', previous);
-      $('saveStatus').textContent = 'Não foi possível salvar: ' + String(err.message || err);
-    } finally {
-      saving = false;
-      $('save').disabled = false;
-      $('close').disabled = false;
-    }
+    const settings = tableau.extensions.settings, previous = settings.get(CONFIG_KEY);
+    saving = true; $('save').disabled = $('close').disabled = true; fail('Salvando…');
+    try{
+      settings.set(CONFIG_KEY, JSON.stringify(candidate)); await settings.saveAsync();
+      config = candidate; render();
+      fail('Configuração salva. Salve/publique a pasta de trabalho para preservá-la.');
+    }catch(err){
+      if (previous === undefined) settings.erase(CONFIG_KEY); else settings.set(CONFIG_KEY, previous);
+      fail('Não foi possível salvar: ' + errText(err));
+    }finally{ saving = false; $('save').disabled = $('close').disabled = false; }
   }
 
-  // ===== ALTERAÇÃO DE DESEMPENHO =====
-  // 1) Especificação visual em cache fora do modo de edição (SmartPedra/Tableau Cloud).
+  // ===== Dados =====
   let specCache = null;
-  async function getSpec() {
+  async function getSpec(){
     if (!author && specCache) return specCache;
     const spec = await sheet.getVisualSpecificationAsync();
     if (!author) specCache = spec;
     return spec;
   }
-
-  // 2) Leitura em uma única chamada (antes: abrir leitor + ler página + liberar leitor).
-  async function readValue() {
-    const spec = await getSpec();
-    const card = spec.marksSpecifications[spec.activeMarksSpecificationIndex];
-    const encodings = card ? card.encodings.filter(e => e.id === 'value') : [];
-    const titleEncoding = card ? card.encodings.find(e => e.id === 'title') : null;
-    const titleField = titleEncoding && titleEncoding.field ? titleEncoding.field : null;
-    const infoEncoding = card ? card.encodings.find(e => e.id === 'info') : null;
-    const infoField = infoEncoding && infoEncoding.field ? infoEncoding.field : null;
-
-    if (encodings.length !== 1 || !encodings[0].field) {
-      return {
-        value: null, name: '', title: null, info: '',
-        message: 'Arraste uma medida para a entrada Valor no cartão Marcas.'
-      };
+  async function readTable(){
+    if (typeof sheet.getSummaryDataReaderAsync === 'function'){
+      const reader = await sheet.getSummaryDataReaderAsync(undefined, {ignoreSelection:true});
+      try{
+        const pages = [];
+        for (let i = 0; i < reader.pageCount; i++) pages.push(await reader.getPageAsync(i));
+        return {columns:pages[0] ? pages[0].columns : [], data:pages.flatMap(p => p.data)};
+      }finally{ await reader.releaseAsync(); }
     }
-
-    const field = encodings[0].field;
-    const page = await sheet.getSummaryDataAsync({ ignoreSelection: true, maxRows: 2 });
-
-    if (page.data.length > 1) {
-      return {
-        value: null, name: field.name, title: null, info: '',
-        message: 'Há várias marcas. Remova dimensões de Detalhe/Linhas/Colunas e agregue a medida em um único valor (SUM, AVG, MAX...).'
-      };
-    }
-    if (!page.data.length) {
-      return { value: null, name: field.name, title: null, info: '', message: 'Sem dados para os filtros atuais.' };
-    }
-
-    const column = page.columns.find(c => c.fieldName === field.name);
-    if (!column) throw new Error('A medida da entrada Valor não foi encontrada nos dados da planilha.');
-
-    const cell = page.data[0][column.index];
-    const value = cell && cell.value;
-    let title = null;
-    if (titleField) {
-      const titleColumn = page.columns.find(c => c.fieldName === titleField.name);
-      if (!titleColumn) throw new Error(`O campo Título (${titleField.name}) não foi encontrado nos dados da planilha.`);
-      const titleCell = page.data[0][titleColumn.index];
-      const rawTitle = titleCell && titleCell.value;
-      title = rawTitle === null || rawTitle === undefined ? '' : String(rawTitle).trim();
-    }
-    let info = '';
-    if (infoField) {
-      const infoColumn = page.columns.find(c => c.fieldName === infoField.name);
-      if (!infoColumn) throw new Error(`O campo Informação (${infoField.name}) não foi encontrado nos dados da planilha.`);
-      const infoCell = page.data[0][infoColumn.index];
-      const rawInfo = infoCell && infoCell.value;
-      info = rawInfo === null || rawInfo === undefined ? '' : String(rawInfo).trim();
-    }
-    if (!finite(value)) {
-      return { value: null, name: field.name, title, info, message: 'A medida está nula ou não é numérica.' };
-    }
-    return { value, name: field.name, title, info, message: '' };
+    const t = await sheet.getSummaryDataAsync({ignoreSelection:true});
+    return {columns:t.columns, data:t.data};
   }
-  // ===== FIM DA ALTERAÇÃO =====
 
-  async function update() {
-    pending = true;
-    if (running) return;
-    running = true;
+  async function readItems(){
+    const spec = await getSpec(), card = spec.marksSpecifications[spec.activeMarksSpecificationIndex];
+    const enc = card ? card.encodings : [], fieldFor = id => { const e = enc.find(x => x.id === id); return e && e.field ? e.field : null; };
+    const fValue = fieldFor('value'), fTitle = fieldFor('title'), fInfo = fieldFor('info'), fStatus = fieldFor('status');
+    if (!fValue) return {items:[], message:'Arraste a medida de velocidade (%) para a entrada Valor no cartão Marcas.'};
+    if (!fTitle) return {items:[], message:'Arraste a dimensão do motor para a entrada Título no cartão Marcas.'};
 
-    try {
-      while (pending) {
+    const table = await readTable();
+    if (!table.data.length) return {items:[], message:'Sem dados para os filtros atuais.'};
+    const idx = f => {
+      if (!f) return -1;
+      const col = table.columns.find(c => c.fieldName === f.name);
+      if (!col) throw new Error(`O campo ${f.name} não foi encontrado nos dados da planilha.`);
+      return col.index;
+    };
+    const iV = idx(fValue), iT = idx(fTitle), iI = idx(fInfo), iS = idx(fStatus);
+    const raw = (row, i) => { if (i < 0) return undefined; const c = row[i]; return c ? c.value : null; };
+    const shown = (row, i) => { const c = row[i]; return c ? String(c.formattedValue ?? c.value) : ''; };
+
+    const map = new Map(), out = [];
+    for (const row of table.data){
+      const title = isNull(raw(row, iT)) ? '(sem nome)' : shown(row, iT).trim();
+      const key = title.toLocaleLowerCase('pt-BR');
+      if (map.has(key)){ map.get(key).dupes++; continue; }
+      // erros de uma linha ficam só no cartão dela
+      const item = {key, title, value:null, info:null, status:null, error:'', dupes:0};
+      try{
+        const v = raw(row, iV);
+        if (finite(v)) item.value = v; else item.error = 'Valor nulo ou não numérico.';
+        if (iI >= 0){ const x = raw(row, iI); item.info = finite(x) ? x : (isNull(x) ? null : shown(row, iI).trim()); }
+        if (iS >= 0){ const s = raw(row, iS); item.status = isNull(s) ? null : shown(row, iS).trim(); }
+      }catch(e){ item.error = errText(e); }
+      map.set(key, item); out.push(item);
+    }
+    for (const item of out) if (item.dupes){
+      item.value = null;
+      item.error = `${item.dupes + 1} linhas para este motor. Retire dimensões extras do cartão Marcas.`;
+    }
+    return {items:out, message:''};
+  }
+
+  async function update(){
+    pending = true; if (running) return; running = true;
+    try{
+      while (pending){
         pending = false;
-        try {
-          const result = await readValue();
-          current = result.value;
-          fieldName = result.name;
-          dynamicTitle = result.title === undefined ? null : result.title;
-          dynamicInfo = result.info || '';
-          dataMessage = result.message;
-        } catch (err) {
-          current = null;
-          dynamicTitle = null;
-          dynamicInfo = '';
-          dataMessage = 'Não foi possível ler a medida: ' + String(err.message || err);
-        }
+        try{ const r = await readItems(); items = r.items; globalMessage = r.message; }
+        catch(err){ items = []; globalMessage = 'Não foi possível ler os campos: ' + errText(err); }
         if (!pending) render();
       }
-    } finally {
-      running = false;
-    }
+    }finally{ running = false; }
   }
 
-  function syncColorControls(event) {
-    const preset = $('colorPresetInput').value;
-    const enabled = preset === 'custom';
-    if (event && palettes[preset]) {
-      for (const [key, value] of Object.entries(palettes[preset])) {
-        $(`color${key[0].toUpperCase()}${key.slice(1)}Input`).value = value;
-      }
-    }
-    for (const id of ['colorProgressInput', 'colorTrackInput', 'colorNeedleInput', 'colorLabelsInput', 'colorNumbersInput', 'colorTitleInput', 'colorValueInput']) $(id).disabled = !enabled;
-  }
-
-  $('colorPresetInput').addEventListener('change', syncColorControls);
-  $('addGaugeRange').addEventListener('click', addGaugeRange);
-  $('useColorRangesInput').addEventListener('change', () => { $('colorRangesPanel').hidden = !$('useColorRangesInput').checked; });
-  $('designInput').addEventListener('change', () => {
-    if ($('designInput').value === 'realistic' && $('colorPresetInput').value === 'mono') {
-      $('colorPresetInput').value = 'redNeedle';
-      syncColorControls(new Event('change'));
-    }
+  // ===== Eventos =====
+  $('columnsInput').addEventListener('change', syncModes);
+  $('arcByStatusInput').addEventListener('change', syncModes);
+  for (const [i] of outputs) $(i).addEventListener('input', updateOutputs);
+  $('resetColors').addEventListener('click', () => {
+    for (const [k, id] of Object.entries(colorIds)) $(id).value = defaultColors[k];
+    $('iconColorInput').value = defaults.iconColor; $('onColorInput').value = defaults.onColor; $('offColorInput').value = defaults.offColor;
   });
-
-  function updateSizeOutputs() {
-    for (const [id, output] of [
-      ['poolZoomInput', 'poolZoomValue'], ['fontTitleInput', 'fontTitleValue'],
-      ['fontPercentageInput', 'fontPercentageValue'], ['fontLabelInput', 'fontLabelValue'],
-      ['arcPercentInput', 'arcPercentValue'], ['majorTickLengthInput', 'majorTickLengthValue'], ['smallTickLengthInput', 'smallTickLengthValue'],
-      ['majorTickOffsetInput', 'majorTickOffsetValue'], ['smallTickOffsetInput', 'smallTickOffsetValue'], ['numberOffsetInput', 'numberOffsetValue']
-    ]) {
-      const value = Number($(id).value);
-      const text = id === 'arcPercentInput' ? `${value}% da circunferência`
-        : id.endsWith('OffsetInput') ? (value === 0 ? 'posição padrão' : `${Math.abs(value)} px para ${value < 0 ? 'dentro' : 'fora'}`)
-        : $(id).value + (id === 'poolZoomInput' ? '%' : ' px');
-      $(output).textContent = text;
-    }
-  }
-
-  for (const id of ['poolZoomInput', 'fontTitleInput', 'fontPercentageInput', 'fontLabelInput', 'arcPercentInput', 'majorTickLengthInput', 'smallTickLengthInput', 'majorTickOffsetInput', 'smallTickOffsetInput', 'numberOffsetInput']) {
-    $(id).addEventListener('input', updateSizeOutputs);
-  }
-
-  function observeContainerSize() {
-    if (!('ResizeObserver' in window)) return;
-    const container = $('main');
-    if (!container) return;
-    resizeObserver = new ResizeObserver(entries => {
-      const box = entries[entries.length - 1].contentRect;
-      document.body.dataset.compact = String(box.width < 260 || box.height < 190);
-    });
-    resizeObserver.observe(container);
-  }
-
   $('configure').addEventListener('click', openConfig);
-  $('close').addEventListener('click', () => { $('settingsPanel').hidden = true; });
+  $('close').addEventListener('click', closeConfig);
   $('settingsForm').addEventListener('submit', saveConfig);
+  document.addEventListener('visibilitychange', () => document.body.classList.toggle('page-hidden', document.hidden));
+  if ('ResizeObserver' in window){
+    let raf = 0;
+    new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(layout); }).observe($('grid'));
+  } else window.addEventListener('resize', layout);
 
-  async function init() {
-    try {
-      if (!window.tableau) {
-        throw new Error('Biblioteca Tableau não carregou. Verifique a pasta vendor.');
-      }
-      if (window.self === window.top) {
-        throw new Error('Adicione o arquivo .trex pelo cartão Marcas de uma planilha Tableau.');
-      }
-
-      await tableau.extensions.initializeAsync({ configure: openConfig });
-      if (!tableau.extensions.worksheetContent) {
-        throw new Error('Use uma extensão de visualização no Tableau 2024.2 ou posterior.');
-      }
-
+  async function init(){
+    try{
+      if (!window.tableau) throw new Error('Biblioteca Tableau não carregou. Verifique a pasta vendor.');
+      if (window.self === window.top) throw new Error('Adicione o arquivo .trex pelo cartão Marcas de uma planilha Tableau.');
+      await tableau.extensions.initializeAsync({configure:openConfig});
+      if (!tableau.extensions.worksheetContent) throw new Error('Use uma extensão de visualização no Tableau 2024.2 ou posterior.');
       sheet = tableau.extensions.worksheetContent.worksheet;
       author = tableau.extensions.environment.mode === 'authoring';
-      config = readConfig();
-      angle = zeroAngle();
-      $('configure').hidden = !author;
-      observeContainerSize();
+      config = readConfig(); $('configure').hidden = !author;
       sheet.addEventListener(tableau.TableauEventType.SummaryDataChanged, update);
       await update();
-      if (author && !validMax(config.maximum)) openConfig();
-    } catch (err) {
-      dataMessage = String(err.message || err);
-      render();
-      $('notice').textContent = dataMessage;
-    }
+    }catch(err){ globalMessage = errText(err); render(); }
   }
-
+  render();
   void init();
 })();
