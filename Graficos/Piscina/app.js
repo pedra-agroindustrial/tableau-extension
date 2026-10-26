@@ -1,213 +1,461 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const defaults = {title:'Piscina',label:'PISCINA',decimals:1,theme:'gray',poolZoom:120,fitMode:'proportional',fontTitle:18,fontPercentage:29,fontLabel:20,colorPreset:'mono',colors:{walls:'#c5c5c5',empty:'#eeeeee',edge:'#d8d8d8',title:'#686868',label:'#303030'},ranges:[{color:'#e53935',end:100}]};
-  const palettes={mono:{walls:'#c5c5c5',empty:'#eeeeee',edge:'#d8d8d8',title:'#686868',label:'#303030'},ocean:{walls:'#b6ccd8',empty:'#e6f4fb',edge:'#8eafbd',title:'#476579',label:'#17324a'},forest:{walls:'#b9cdbb',empty:'#e3eee4',edge:'#91af94',title:'#526b54',label:'#213c25'},sunset:{walls:'#e2c6a6',empty:'#f6ead9',edge:'#cba27d',title:'#735e4a',label:'#4b3527'},violet:{walls:'#c9bddb',empty:'#ece6f7',edge:'#a090bc',title:'#675c7e',label:'#35245a'}};
-  let config={...defaults},sheet,author=false,saving=false,running=false,pending=false;
-  let current=null,fieldName='',dataMessage='',dynamic={title:null,label:null,limit1:null},level=0,animation,waveAnimation=null,wavePhase=0,resizeObserver=null,resizeFrame=0;
-  const validColor = c => typeof c==='string' && /^#[0-9a-fA-F]{6}$/.test(c);
-  const finite = n => typeof n==='number' && Number.isFinite(n);
-  const number = (n,d=config.decimals) => n.toLocaleString('pt-BR',{maximumFractionDigits:d});
-  const defaultConfig = () => ({...defaults,ranges:defaults.ranges.map(r=>({...r}))});
-  const validRanges = ranges => Array.isArray(ranges)&&ranges.length>=1&&ranges.length<=10&&ranges.every((r,i)=>validColor(r.color)&&finite(r.end)&&r.end>(i?ranges[i-1].end:0)&&r.end<=500);
+  const CONFIG_KEY = 'poolGridConfig';
+  const CONFIG_VERSION = 4;   // mantido: configurações salvas na v4.0 continuam valendo
+
+  // ===== Paletas da estrutura =====
+  const palettes = {
+    padrao:{walls:'#b4c2b0',stroke:'#56645a',empty:'#eef1f4',card:'#ffffff',title:'#1f2933',muted:'#6b7480'},
+    cinza: {walls:'#c5c5c5',stroke:'#6f6f6f',empty:'#f0f0f0',card:'#ffffff',title:'#303030',muted:'#707070'},
+    oceano:{walls:'#b6ccd8',stroke:'#4f6b7a',empty:'#eaf5fb',card:'#ffffff',title:'#17324a',muted:'#5a7385'}
+  };
+  const RANGE_COLORS = ['#f6c343','#1e8e3e','#1e88e5','#8e24aa','#00acc1','#f4511e','#3949ab','#7cb342','#6d4c41'];
+
+  const defaults = {
+    version:CONFIG_VERSION,
+    showHeader:true, sectionTitle:'NÍVEL DE REPRESA',
+    sectionSubtitle:'Percentual do nível atual em relação à capacidade útil', iconColor:'#1e8e3e',
+    columns:0, minCard:170, sort:'tableau', gap:8, maxCards:24,
+    uppercase:true, decimals:1,
+    footerPrefix:'Volume atual:', footerSuffix:'m³', footerDecimals:0,
+    showBadge:true,
+    ranges:[
+      {name:'BAIXO',   color:'#d32f2f', end:10},
+      {name:'ATENÇÃO', color:'#f6c343', end:40},
+      {name:'NORMAL',  color:'#1e8e3e', end:500}
+    ],
+    waterMode:'fixed', waterColor:'#1e6fd9',
+    percentMode:'fixed', percentColor:'#1565c0', percentFirstRange:true,
+    wave:true, showCard:true, showAxis:true,
+    fontTitle:13, fontPercentage:30, fontFooter:12,
+    colorPreset:'padrao', colors:{...palettes.padrao}, theme:'light'
+  };
+
+  let config = clone(defaults), sheet, author = false, saving = false, running = false, pending = false;
+  let items = [], globalMessage = '';
+  const cards = new Map();
+  let cardSeq = 0;
+
+  function clone(o){ return JSON.parse(JSON.stringify(o)); }
+  const validColor = c => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c);
+  const finite = n => typeof n === 'number' && Number.isFinite(n);
+  const fmt = (n, d) => n.toLocaleString('pt-BR', {minimumFractionDigits:d, maximumFractionDigits:d});
+  const intIn = (v, min, max, fb) => Number.isInteger(v) && v >= min && v <= max ? v : fb;
+  const oneOf = (v, list, fb) => list.includes(v) ? v : fb;
+  const bool = (v, fb) => typeof v === 'boolean' ? v : fb;
+  const str = (v, max, fb) => typeof v === 'string' ? v.slice(0, max) : fb;
+  const validRanges = r => Array.isArray(r) && r.length >= 1 && r.length <= 10 &&
+    r.every((x, i) => validColor(x.color) && typeof x.name === 'string' && finite(x.end) && x.end > (i ? r[i-1].end : 0) && x.end <= 500);
+  const errText = e => String((e && e.message) || e);
+  const isNull = v => v === null || v === undefined || v === '' || v === '%null%';
+
+  function mix(hex, target, t){
+    const a = parseInt(hex.slice(1), 16), b = parseInt(target.slice(1), 16);
+    const ch = s => Math.round(((a >> s) & 255) + ((((b >> s) & 255) - ((a >> s) & 255)) * t));
+    return '#' + [16, 8, 0].map(s => ch(s).toString(16).padStart(2, '0')).join('');
+  }
+  function textOn(hex){
+    const n = parseInt(hex.slice(1), 16), [r, g, b] = [n >> 16 & 255, n >> 8 & 255, n & 255];
+    return (0.299 * r + 0.587 * g + 0.114 * b) > 160 ? '#3b2f00' : '#ffffff';
+  }
+
+  // ===== Configuração =====
   function readConfig(){
-    const raw=tableau.extensions.settings.get('poolConfig');if(!raw)return defaultConfig();
+    const raw = tableau.extensions.settings.get(CONFIG_KEY);
+    if (!raw) return clone(defaults);
     try{
-      const c=JSON.parse(raw);
-      let ranges;
-      if(Array.isArray(c.ranges))ranges=c.ranges.map(r=>({color:r.color,end:Number(r.end)}));
-      else if(c.range1Max!==undefined)ranges=[
-        {color:validColor(c.color1)?c.color1:defaults.ranges[0].color,end:Number(c.range1Max)},
-        {color:validColor(c.color2)?c.color2:'#ffb300',end:Number(c.range2Max??c.threshold2??100)},
-        {color:validColor(c.color3)?c.color3:'#43a047',end:100}
-      ];
-      else if(finite(Number(c.threshold1))&&finite(Number(c.threshold2))&&Number(c.threshold1)<Number(c.threshold2))ranges=[
-        {color:validColor(c.color1)?c.color1:defaults.ranges[0].color,end:Number(c.threshold1)},
-        {color:validColor(c.color2)?c.color2:'#ffb300',end:Number(c.threshold2)},
-        {color:validColor(c.color3)?c.color3:'#43a047',end:100}
-      ];
-      else ranges=defaultConfig().ranges;
-      const previousDefaults=Number(c.range1Max)===60&&Number(c.range2Max)===85&&Number(c.range3Max)===100&&c.color1==='#e53935'&&c.color2==='#ffb300'&&c.color3==='#43a047';
-      if(!Array.isArray(c.ranges)&&previousDefaults)ranges=defaultConfig().ranges;
-      if(!validRanges(ranges))ranges=defaultConfig().ranges;
-      return {title:typeof c.title==='string'?c.title.slice(0,80):defaults.title,
-        label:typeof c.label==='string'?c.label.slice(0,48):defaults.label,
-        decimals:Number.isInteger(c.decimals)&&c.decimals>=0&&c.decimals<=3?c.decimals:defaults.decimals,
-        theme:['light','gray','transparent','dark'].includes(c.theme)?c.theme:defaults.theme,
-        poolZoom:Number.isInteger(c.poolZoom)&&c.poolZoom>=90&&c.poolZoom<=125?c.poolZoom:defaults.poolZoom,
-        fitMode:['proportional','fill'].includes(c.fitMode)?c.fitMode:defaults.fitMode,
-        fontTitle:Number.isInteger(c.fontTitle)&&c.fontTitle>=10&&c.fontTitle<=36?c.fontTitle:defaults.fontTitle,
-        fontPercentage:Number.isInteger(c.fontPercentage)&&c.fontPercentage>=16&&c.fontPercentage<=48?c.fontPercentage:defaults.fontPercentage,
-        fontLabel:Number.isInteger(c.fontLabel)&&c.fontLabel>=12&&c.fontLabel<=36?c.fontLabel:defaults.fontLabel,
-        colorPreset:['mono','ocean','forest','sunset','violet','custom'].includes(c.colorPreset)?c.colorPreset:defaults.colorPreset,
-        colors:Object.fromEntries(Object.entries(defaults.colors).map(([key,fallback])=>[key,validColor(c.colors?.[key])?c.colors[key]:fallback])),
-        ranges};
-    }catch(_){return defaultConfig();}
+      const c = JSON.parse(raw), d = clone(defaults);
+      if (c.version !== CONFIG_VERSION) return d;
+      const ranges = Array.isArray(c.ranges) ? c.ranges.map(r => ({name:String(r.name ?? '').slice(0, 20), color:r.color, end:Number(r.end)})) : null;
+      return {
+        version:CONFIG_VERSION,
+        showHeader:bool(c.showHeader, d.showHeader), sectionTitle:str(c.sectionTitle, 60, d.sectionTitle),
+        sectionSubtitle:str(c.sectionSubtitle, 120, d.sectionSubtitle), iconColor:validColor(c.iconColor) ? c.iconColor : d.iconColor,
+        columns:intIn(c.columns, 0, 10, d.columns), minCard:intIn(c.minCard, 120, 400, d.minCard),
+        sort:oneOf(c.sort, ['tableau','alpha','worst','valueAsc','valueDesc'], d.sort),
+        gap:intIn(c.gap, 0, 24, d.gap), maxCards:intIn(c.maxCards, 1, 50, d.maxCards),
+        uppercase:bool(c.uppercase, d.uppercase), decimals:intIn(c.decimals, 0, 3, d.decimals),
+        footerPrefix:str(c.footerPrefix, 40, d.footerPrefix), footerSuffix:str(c.footerSuffix, 12, d.footerSuffix),
+        footerDecimals:intIn(c.footerDecimals, 0, 2, d.footerDecimals),
+        showBadge:bool(c.showBadge, d.showBadge), ranges:validRanges(ranges) ? ranges : d.ranges,
+        waterMode:oneOf(c.waterMode, ['fixed','range'], d.waterMode), waterColor:validColor(c.waterColor) ? c.waterColor : d.waterColor,
+        percentMode:oneOf(c.percentMode, ['fixed','range'], d.percentMode), percentColor:validColor(c.percentColor) ? c.percentColor : d.percentColor,
+        percentFirstRange:bool(c.percentFirstRange, d.percentFirstRange),
+        wave:bool(c.wave, d.wave), showCard:bool(c.showCard, d.showCard), showAxis:bool(c.showAxis, d.showAxis),
+        fontTitle:intIn(c.fontTitle, 9, 28, d.fontTitle), fontPercentage:intIn(c.fontPercentage, 14, 56, d.fontPercentage), fontFooter:intIn(c.fontFooter, 9, 20, d.fontFooter),
+        colorPreset:oneOf(c.colorPreset, ['padrao','cinza','oceano','custom'], d.colorPreset),
+        colors:Object.fromEntries(Object.keys(d.colors).map(k => [k, validColor(c.colors?.[k]) ? c.colors[k] : d.colors[k]])),
+        theme:oneOf(c.theme, ['light','gray','transparent','dark'], d.theme)
+      };
+    }catch(_){ return clone(defaults); }
   }
-  function drawLiquid(){
-    const y=285-level*160,amplitude=level>0&&level<1?2.8:0,wavelength=220,points=[];
-    for(let x=145;x<=505;x+=8){const waveY=y+Math.sin(((x-145)/wavelength)*Math.PI*2+wavePhase)*amplitude;points.push([x,waveY]);}
-    const surfacePath=points.map(([x,py],i)=>`${i?'L':'M'} ${x} ${py.toFixed(2)}`).join(' ');
-    $('liquid').setAttribute('d',`${surfacePath} L 505 450 L 145 450 Z`);$('surface').setAttribute('d',surfacePath);
+
+  // ===== Regras de status =====
+  function rangeIndexFor(item){
+    if (!finite(item.value)) return -1;
+    const ends = config.ranges.map((r, i) => i === 0 && item.limit1 !== null && config.ranges.length > 1 ? item.limit1 : r.end);
+    const idx = ends.findIndex(end => item.value < end);
+    return idx === -1 ? ends.length - 1 : idx;
   }
-  function observeContainerSize(){
-    if(!('ResizeObserver' in window))return;
-    const container=$('main');if(!container)return;
-    resizeObserver=new ResizeObserver(entries=>{
-      const box=entries[entries.length-1].contentRect;
-      document.body.dataset.compact=String(box.width<260||box.height<190);
-      cancelAnimationFrame(resizeFrame);
-      resizeFrame=requestAnimationFrame(drawLiquid);
+  function footerFor(item){
+    const v = item.label;
+    if (isNull(v)) return '';
+    if (typeof v === 'number') return [config.footerPrefix, fmt(v, config.footerDecimals), config.footerSuffix].filter(Boolean).join(' ');
+    return String(v);
+  }
+  function sortItems(list){
+    const out = list.slice();
+    const byName = (a, b) => a.title.localeCompare(b.title, 'pt-BR', {numeric:true, sensitivity:'base'});
+    const val = (x, fb) => finite(x.value) ? x.value : fb;
+    switch (config.sort){
+      case 'alpha': out.sort(byName); break;
+      case 'worst': out.sort((a, b) => (rangeIndexFor(a) - rangeIndexFor(b)) || (val(a, -Infinity) - val(b, -Infinity)) || byName(a, b)); break;
+      case 'valueAsc': out.sort((a, b) => (val(a, -Infinity) - val(b, -Infinity)) || byName(a, b)); break;
+      case 'valueDesc': out.sort((a, b) => (val(b, -Infinity) - val(a, -Infinity)) || byName(a, b)); break;
+    }
+    return out;
+  }
+
+  // ===== Cartões =====
+  function createCard(){
+    const node = $('cardTemplate').content.firstElementChild.cloneNode(true);
+    const n = ++cardSeq, clipId = `clip${n}`, gradId = `grad${n}`;
+    node.querySelector('[data-id="clip"]').id = clipId;
+    node.querySelector('[data-id="grad"]').id = gradId;
+    node.querySelector('.water-clip').setAttribute('clip-path', `url(#${clipId})`);
+    node.querySelector('.liquid').setAttribute('fill', `url(#${gradId})`);
+    const q = s => node.querySelector(s);
+    return {node, title:q('.title'), badge:q('.badge'), pct:q('.percentage'), svg:q('.pool'),
+      top:q('.stop-top'), bottom:q('.stop-bottom'), level:q('.water-level'), foot:q('.card-foot'), error:q('.card-error')};
+  }
+
+  function paintCard(c, item){
+    const hasValue = finite(item.value);
+    const ri = rangeIndexFor(item), range = ri >= 0 ? config.ranges[ri] : null;
+
+    c.title.textContent = item.title; c.title.title = item.title;
+
+    c.badge.hidden = !(config.showBadge && range && range.name);
+    if (!c.badge.hidden){ c.badge.textContent = range.name; c.badge.style.background = range.color; c.badge.style.color = textOn(range.color); }
+
+    // Percentual: cor fixa (azul), cor da faixa, ou cor da faixa 1 só quando estiver nela (ex.: BAIXO em vermelho, como no mockup)
+    let pctColor = config.percentColor;
+    if (range && (config.percentMode === 'range' || (config.percentFirstRange && ri === 0 && config.ranges.length > 1))) pctColor = range.color;
+    c.node.style.setProperty('--percent', pctColor);
+    c.pct.textContent = hasValue ? fmt(item.value, config.decimals) + ' %' : '—';
+
+    const water = config.waterMode === 'range' && range ? range.color : config.waterColor;
+    c.node.style.setProperty('--water', water);
+    c.top.setAttribute('stop-color', mix(water, '#ffffff', .28));
+    c.bottom.setAttribute('stop-color', water);
+    const fraction = hasValue ? Math.min(1, Math.max(0, item.value / 100)) : 0;
+    c.level.style.transform = `translateY(${(165 - fraction * 157).toFixed(2)}px)`;
+    c.level.style.visibility = hasValue && fraction > 0 ? 'visible' : 'hidden';
+    c.node.classList.toggle('overflowing', hasValue && item.value > 100);
+
+    c.foot.textContent = footerFor(item);
+    c.error.textContent = item.error || ''; c.error.hidden = !item.error;
+    c.node.classList.toggle('has-error', !!item.error);
+    c.svg.setAttribute('aria-label', hasValue ? `${item.title}: ${fmt(item.value, config.decimals)} por cento${range && range.name ? ', ' + range.name : ''}.` : `${item.title}: sem valor.`);
+  }
+
+  function applyGlobalStyle(){
+    const body = document.body, root = document.documentElement;
+    const colors = config.colorPreset === 'custom' ? config.colors : (palettes[config.colorPreset] || palettes.padrao);
+    for (const [k, v] of Object.entries(colors)) root.style.setProperty(`--${k}`, v);
+    root.style.setProperty('--icon', config.iconColor);
+    root.style.setProperty('--fs-title', config.fontTitle + 'px');
+    root.style.setProperty('--fs-percent', config.fontPercentage + 'px');
+    root.style.setProperty('--fs-footer', config.fontFooter + 'px');
+    root.style.setProperty('--gap', config.gap + 'px');
+    for (const t of ['gray','transparent','dark']){ root.classList.toggle(t, config.theme === t); body.classList.toggle(t, config.theme === t); }
+    body.classList.toggle('card-on', config.showCard); body.classList.toggle('card-off', !config.showCard);
+    body.classList.toggle('axis-off', !config.showAxis);
+    body.classList.toggle('wave-off', !config.wave);
+    body.classList.toggle('upper', config.uppercase);
+    body.classList.toggle('header-off', !config.showHeader);
+    $('sectionTitle').textContent = config.sectionTitle;
+    $('sectionSubtitle').textContent = config.sectionSubtitle;
+  }
+
+  function layout(){
+    const grid = $('grid'), n = grid.children.length;
+    if (!n) return;
+    const w = grid.clientWidth, h = grid.clientHeight, gap = config.gap;
+    let cols = config.columns || Math.max(1, Math.floor((w + gap) / (config.minCard + gap)));
+    cols = Math.min(cols, n);
+    const rows = Math.ceil(n / cols);
+    grid.style.setProperty('--cols', cols); grid.style.setProperty('--rows', rows);
+    const cw = (w - gap * (cols - 1)) / cols, ch = (h - gap * (rows - 1)) / rows;
+    for (const el of grid.children){
+      el.classList.toggle('compact', cw < 170 || ch < 150);
+      el.classList.toggle('tiny', cw < 125);
+    }
+    fitTitles();
+  }
+  // Mesmo tamanho de título em todos os cartões, reduzindo até caber (mínimo 9 px).
+  function fitTitles(){
+    const titles = [...$('grid').querySelectorAll('.title')];
+    if (!titles.length) return;
+    let size = config.fontTitle;
+    const set = s => titles.forEach(t => { t.style.fontSize = s + 'px'; });
+    set(size);
+    while (size > 9 && titles.some(t => t.scrollWidth > t.clientWidth + 1)){ size -= 0.5; set(size); }
+  }
+
+  function render(){
+    applyGlobalStyle();
+    const grid = $('grid');
+    const visible = sortItems(items).slice(0, config.maxCards);
+    const keep = new Set(visible.map(i => i.key));
+    for (const [k, c] of cards) if (!keep.has(k)){ c.node.remove(); cards.delete(k); }
+    visible.forEach((item, idx) => {
+      let c = cards.get(item.key);
+      if (!c){ c = createCard(); cards.set(item.key, c); }
+      try{ paintCard(c, item); }
+      catch(e){ c.error.textContent = 'Erro ao desenhar: ' + errText(e); c.error.hidden = false; }
+      if (grid.children[idx] !== c.node) grid.insertBefore(c.node, grid.children[idx] || null);
     });
-    resizeObserver.observe(container);
+    let msg = globalMessage;
+    if (!msg && items.length > config.maxCards) msg = `Exibindo ${config.maxCards} de ${items.length} reservatórios. Aumente "Máximo de cartões" em Configurar ou filtre no Tableau.`;
+    $('notice').textContent = msg;
+    layout();
   }
+
+  // ===== Editor de faixas =====
   function rangesFromForm(){
-    return [...$('rangesContainer').querySelectorAll('.range-row')].map(row=>({color:row.querySelector('.range-color').value,end:Number(row.querySelector('.range-end').value)}));
-  }
-  function renderRangeEditor(ranges){
-    const colors=['#ffb300','#43a047','#1e88e5','#8e24aa','#00acc1','#f4511e','#3949ab','#7cb342','#6d4c41'];
-    $('rangesContainer').innerHTML=ranges.map((range,i)=>{
-      const start=i?ranges[i-1].end:0;
-      return `<fieldset class="range range-row"><legend>Faixa ${i+1}</legend><label>Cor<input class="range-color" type="color" value="${range.color}"></label><div class="range-bounds"><label>De (%)<input class="range-start" type="number" value="${start}" readonly></label><label>Até (%)<input class="range-end" type="number" min="${start}" max="500" step="0.1" value="${range.end}"></label></div><button class="remove-range" type="button" data-index="${i}" ${ranges.length===1?'disabled':''}>Remover faixa</button></fieldset>`;
-    }).join('');
-    $('addRange').disabled=ranges.length>=10;
-    $('rangesContainer').querySelectorAll('.remove-range').forEach(button=>button.addEventListener('click',()=>{
-      const current=rangesFromForm();
-      if(!validRanges(current)){$('saveStatus').textContent='Ajuste os limites para ficarem em ordem crescente antes de remover uma faixa.';return;}
-      const index=Number(button.dataset.index),totalEnd=current[current.length-1].end;current.splice(index,1);current[current.length-1].end=totalEnd;renderRangeEditor(current);$('saveStatus').textContent='';
+    return [...$('rangesContainer').querySelectorAll('.range-row')].map(row => ({
+      name:row.querySelector('.range-name').value.trim().slice(0, 20),
+      color:row.querySelector('.range-color').value,
+      end:Number(row.querySelector('.range-end').value)
     }));
-    $('rangesContainer').querySelectorAll('.range-end').forEach(input=>input.addEventListener('input',()=>{
-      let start=0;
-      $('rangesContainer').querySelectorAll('.range-row').forEach(row=>{row.querySelector('.range-start').value=String(start);row.querySelector('.range-end').min=String(start);start=Number(row.querySelector('.range-end').value);});
+  }
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  function renderRangeEditor(ranges){
+    $('rangesContainer').innerHTML = ranges.map((r, i) => {
+      const start = i ? ranges[i-1].end : 0;
+      return `<fieldset class="range range-row"><legend>Faixa ${i+1}</legend>
+        <div class="range-grid">
+          <label>Status<input class="range-name" maxlength="20" value="${esc(r.name)}"></label>
+          <label>Cor<input class="range-color" type="color" value="${r.color}"></label>
+          <label>De (%)<input class="range-start" type="number" value="${start}" readonly></label>
+          <label>Até (%)<input class="range-end" type="number" min="${start}" max="500" step="0.1" value="${r.end}"></label>
+        </div>
+        <button class="remove-range" type="button" data-index="${i}" ${ranges.length === 1 ? 'disabled' : ''}>Remover faixa</button>
+      </fieldset>`;
+    }).join('');
+    $('addRange').disabled = ranges.length >= 10;
+    $('rangesContainer').querySelectorAll('.remove-range').forEach(btn => btn.addEventListener('click', () => {
+      const cur = rangesFromForm();
+      if (!validRanges(cur)){ $('saveStatus').textContent = 'Ajuste os limites em ordem crescente antes de remover uma faixa.'; return; }
+      const lastEnd = cur[cur.length - 1].end; cur.splice(Number(btn.dataset.index), 1); cur[cur.length - 1].end = lastEnd;
+      renderRangeEditor(cur); $('saveStatus').textContent = '';
+    }));
+    $('rangesContainer').querySelectorAll('.range-end').forEach(inp => inp.addEventListener('input', () => {
+      let start = 0;
+      $('rangesContainer').querySelectorAll('.range-row').forEach(row => {
+        row.querySelector('.range-start').value = String(start); row.querySelector('.range-end').min = String(start);
+        start = Number(row.querySelector('.range-end').value);
+      });
     }));
   }
   function addRange(){
-    const ranges=rangesFromForm();
-    if(!validRanges(ranges)){$('saveStatus').textContent='Ajuste os limites em ordem crescente antes de adicionar outra faixa.';return;}
-    if(ranges.length>=10)return;
-    const currentEnd=ranges[ranges.length-1].end,previousEnd=ranges.length>1?ranges[ranges.length-2].end:0;
-    const split=Math.round(((previousEnd+currentEnd)/2)*10)/10;
-    if(split<=previousEnd||split>=currentEnd){$('saveStatus').textContent='Não há espaço entre os limites atuais para criar outra faixa de pelo menos 0,1%.';return;}
-    ranges[ranges.length-1].end=split;
-    const colors=['#ffb300','#43a047','#1e88e5','#8e24aa','#00acc1','#f4511e','#3949ab','#7cb342','#6d4c41'];
-    ranges.push({color:colors[(ranges.length-1)%colors.length],end:currentEnd});
-    renderRangeEditor(ranges);$('saveStatus').textContent='';
-  }
-  function moveLiquid(target,immediate=false){
-    cancelAnimationFrame(animation);const initial=level,start=performance.now();
-    const duration=immediate||matchMedia('(prefers-reduced-motion: reduce)').matches?0:650;
-    function frame(t){const p=duration?Math.min(1,(t-start)/duration):1;level=initial+(target-initial)*(1-Math.pow(1-p,3));drawLiquid();if(p<1)animation=requestAnimationFrame(frame);}
-    animation=requestAnimationFrame(frame);
-  }
-  function animateWave(){
-    if(!finite(current)||current<=0||current>=100||matchMedia('(prefers-reduced-motion: reduce)').matches){if(waveAnimation!==null)cancelAnimationFrame(waveAnimation);waveAnimation=null;return;}
-    if(waveAnimation!==null)return;
-    const tick=t=>{wavePhase=t*0.0015;drawLiquid();waveAnimation=requestAnimationFrame(tick);};waveAnimation=requestAnimationFrame(tick);
-  }
-  function render(){
-    const selectedColors=config.colorPreset==='custom'?config.colors:(palettes[config.colorPreset]||palettes.mono);
-    for(const [key,value] of Object.entries(selectedColors))document.body.style.setProperty(`--pool-${key}`,value);
-    for(const theme of ['gray','transparent','dark']){document.documentElement.classList.toggle(theme,config.theme===theme);document.body.classList.toggle(theme,config.theme===theme);}
-    const zoom=config.poolZoom/100,viewWidth=640/zoom,viewHeight=390/zoom;
-    $('pool').setAttribute('viewBox',`${(640-viewWidth)/2} ${(390-viewHeight)/2} ${viewWidth} ${viewHeight}`);
-    $('pool').setAttribute('preserveAspectRatio',config.fitMode==='fill'?'none':'xMidYMid meet');
-    $('title').setAttribute('font-size',String(config.fontTitle/zoom));$('percentage').setAttribute('font-size',String(config.fontPercentage/zoom));$('poolLabel').setAttribute('font-size',String(config.fontLabel/zoom));
-    const hasValue=finite(current),fraction=hasValue?Math.min(1,Math.max(0,current/100)):0;
-    const boundaries=config.ranges.map((range,i)=>i===0&&dynamic.limit1!==null&&config.ranges.length>1?dynamic.limit1:range.end);
-    const activeRange=hasValue?Math.max(0,boundaries.findIndex((end,i)=>current<end||i===boundaries.length-1)):0;
-    const liquidColor=config.ranges[activeRange].color;
-    // Define a cor nos elementos SVG diretamente para evitar CSS/cache antigo sobrescrevendo --water.
-    $('liquid').style.fill=liquidColor;$('percentage').style.fill=liquidColor;
-    $('overflow').style.display=hasValue&&current>100?'':'none';$('overflowLeft').style.stroke=liquidColor;$('overflowRight').style.stroke=liquidColor;$('overflowDropLeft').style.fill=liquidColor;$('overflowDropRight').style.fill=liquidColor;
-    const titleText=dynamic.title!==null?dynamic.title:(config.title||fieldName||'Piscina');
-    $('title').textContent=titleText;$('poolLabel').textContent=dynamic.label||config.label;
-    $('percentage').textContent=hasValue?number(current)+' %':'—';
-    $('liquid').style.visibility=hasValue&&fraction>0?'visible':'hidden';$('surface').style.visibility=hasValue&&fraction>0?'visible':'hidden';
-    moveLiquid(fraction,!hasValue);animateWave();
-    let message=dataMessage;if(hasValue&&current>100)message='Transbordando: valor acima de 100%.';if(hasValue&&current<0)message='Valor abaixo de 0%; piscina visualmente vazia.';
-    $('notice').textContent=message;
-    $('pool').setAttribute('aria-label',hasValue?`${titleText||fieldName||'Piscina'}: ${number(current)} por cento.`:message||'Sem dados');
-  }
-  function openConfig(){
-    if(!author||saving)return;
-    $('titleInput').value=config.title;$('labelInput').value=config.label;$('decimalsInput').value=String(config.decimals);
-    $('poolZoomInput').value=String(config.poolZoom);$('fitModeInput').value=config.fitMode;
-    $('fontTitleInput').value=String(config.fontTitle);$('fontPercentageInput').value=String(config.fontPercentage);$('fontLabelInput').value=String(config.fontLabel);updateSizeOutputs();
-    renderRangeEditor(config.ranges.map(r=>({...r})));$('themeInput').value=config.theme;
-    $('colorPresetInput').value=config.colorPreset;for(const [key,value] of Object.entries(config.colors))$(`color${key[0].toUpperCase()}${key.slice(1)}Input`).value=value;syncColorControls();
-    $('saveStatus').textContent='';$('settingsPanel').hidden=false;
-  }
-  async function saveConfig(e){
-    e.preventDefault();if(!author||saving)return;
-    const candidate={title:$('titleInput').value.trim(),label:$('labelInput').value.trim(),decimals:Number($('decimalsInput').value),theme:$('themeInput').value,colorPreset:$('colorPresetInput').value,colors:{walls:$('colorWallsInput').value,empty:$('colorEmptyInput').value,edge:$('colorEdgeInput').value,title:$('colorTitleInput').value,label:$('colorLabelInput').value},poolZoom:Number($('poolZoomInput').value),fitMode:$('fitModeInput').value,fontTitle:Number($('fontTitleInput').value),fontPercentage:Number($('fontPercentageInput').value),fontLabel:Number($('fontLabelInput').value),ranges:rangesFromForm()};
-    if(!['mono','ocean','forest','sunset','violet','custom'].includes(candidate.colorPreset)||!Object.values(candidate.colors).every(validColor)){ $('saveStatus').textContent='Confira as cores personalizadas.';return;}
-    if(!Number.isInteger(candidate.poolZoom)||candidate.poolZoom<90||candidate.poolZoom>125||!['proportional','fill'].includes(candidate.fitMode)||!Number.isInteger(candidate.fontTitle)||candidate.fontTitle<10||candidate.fontTitle>36||!Number.isInteger(candidate.fontPercentage)||candidate.fontPercentage<16||candidate.fontPercentage>48||!Number.isInteger(candidate.fontLabel)||candidate.fontLabel<12||candidate.fontLabel>36){$('saveStatus').textContent='Confira a ampliação (90% a 125%) e os tamanhos das fontes dentro dos limites indicados.';return;}
-    if(!validRanges(candidate.ranges)){$('saveStatus').textContent='As faixas precisam estar em ordem crescente e terminar em um limite entre 0% e 500%. Ajuste o limite “Até (%)” de cada faixa.';return;}
-    const settings=tableau.extensions.settings,previous=settings.get('poolConfig');saving=true;$('save').disabled=true;$('close').disabled=true;$('saveStatus').textContent='Salvando…';
-    try{settings.set('poolConfig',JSON.stringify(candidate));await settings.saveAsync();config=candidate;render();$('saveStatus').textContent='Configuração salva. Salve/publique a pasta de trabalho para preservá-la.';}
-    catch(err){if(previous===undefined)settings.erase('poolConfig');else settings.set('poolConfig',previous);$('saveStatus').textContent='Não foi possível salvar: '+String(err.message||err);}
-    finally{saving=false;$('save').disabled=false;$('close').disabled=false;}
+    const r = rangesFromForm();
+    if (!validRanges(r)){ $('saveStatus').textContent = 'Ajuste os limites em ordem crescente antes de adicionar outra faixa.'; return; }
+    if (r.length >= 10) return;
+    const curEnd = r[r.length - 1].end, prevEnd = r.length > 1 ? r[r.length - 2].end : 0;
+    const split = Math.round(((prevEnd + curEnd) / 2) * 10) / 10;
+    if (split <= prevEnd || split >= curEnd){ $('saveStatus').textContent = 'Não há espaço entre os limites para criar outra faixa.'; return; }
+    r[r.length - 1].end = split;
+    r.push({name:'NOVO', color:RANGE_COLORS[(r.length - 1) % RANGE_COLORS.length], end:curEnd});
+    renderRangeEditor(r); $('saveStatus').textContent = '';
   }
 
-  // ===== ALTERAÇÃO DE DESEMPENHO =====
-  // Em visualização (SmartPedra/Tableau Cloud) os campos do cartão Marcas não mudam:
-  // a especificação visual é buscada uma única vez. Em edição, continua sendo lida sempre.
-  let specCache=null;
+  // ===== Painel de configuração =====
+  const colorIds = {walls:'colorWallsInput', stroke:'colorStrokeInput', empty:'colorEmptyInput', card:'colorCardInput', title:'colorTitleInput', muted:'colorMutedInput'};
+  function syncColorControls(event){
+    const p = $('colorPresetInput').value;
+    if (event && palettes[p]) for (const [k, id] of Object.entries(colorIds)) $(id).value = palettes[p][k];
+    for (const id of Object.values(colorIds)) $(id).disabled = p !== 'custom';
+  }
+  function syncModes(){
+    $('waterColorInput').disabled = $('waterModeInput').value !== 'fixed';
+    $('percentColorInput').disabled = $('percentModeInput').value !== 'fixed';
+    $('percentFirstRangeInput').disabled = $('percentModeInput').value !== 'fixed';
+    $('minCardInput').disabled = $('columnsInput').value !== '0';
+  }
+  const sizes = [['fontTitleInput','fontTitleValue'],['fontPercentageInput','fontPercentageValue'],['fontFooterInput','fontFooterValue'],['gapInput','gapValue']];
+  function updateSizeOutputs(){ for (const [i, o] of sizes) $(o).textContent = $(i).value + ' px'; }
+
+  function openConfig(){
+    if (!author || saving) return;
+    const c = config;
+    $('showHeaderInput').checked = c.showHeader; $('sectionTitleInput').value = c.sectionTitle;
+    $('sectionSubtitleInput').value = c.sectionSubtitle; $('iconColorInput').value = c.iconColor;
+    $('columnsInput').value = String(c.columns); $('minCardInput').value = String(c.minCard);
+    $('sortInput').value = c.sort; $('gapInput').value = String(c.gap); $('maxCardsInput').value = String(c.maxCards);
+    $('uppercaseInput').checked = c.uppercase; $('decimalsInput').value = String(c.decimals);
+    $('footerPrefixInput').value = c.footerPrefix; $('footerSuffixInput').value = c.footerSuffix;
+    $('footerDecimalsInput').value = String(c.footerDecimals);
+    renderRangeEditor(clone(c.ranges)); $('showBadgeInput').checked = c.showBadge;
+    $('waterModeInput').value = c.waterMode; $('waterColorInput').value = c.waterColor;
+    $('percentModeInput').value = c.percentMode; $('percentColorInput').value = c.percentColor;
+    $('percentFirstRangeInput').checked = c.percentFirstRange; $('waveInput').checked = c.wave;
+    $('showCardInput').checked = c.showCard; $('showAxisInput').checked = c.showAxis;
+    $('fontTitleInput').value = String(c.fontTitle); $('fontPercentageInput').value = String(c.fontPercentage); $('fontFooterInput').value = String(c.fontFooter);
+    $('colorPresetInput').value = c.colorPreset; for (const [k, id] of Object.entries(colorIds)) $(id).value = c.colors[k];
+    $('themeInput').value = c.theme;
+    updateSizeOutputs(); syncColorControls(); syncModes();
+    $('saveStatus').textContent = ''; $('settingsPanel').hidden = false; document.body.classList.add('configuring');
+  }
+  function closeConfig(){ $('settingsPanel').hidden = true; document.body.classList.remove('configuring'); }
+
+  async function saveConfig(e){
+    e.preventDefault(); if (!author || saving) return;
+    const candidate = {
+      version:CONFIG_VERSION,
+      showHeader:$('showHeaderInput').checked, sectionTitle:$('sectionTitleInput').value.trim(),
+      sectionSubtitle:$('sectionSubtitleInput').value.trim(), iconColor:$('iconColorInput').value,
+      columns:Number($('columnsInput').value), minCard:Number($('minCardInput').value),
+      sort:$('sortInput').value, gap:Number($('gapInput').value), maxCards:Number($('maxCardsInput').value),
+      uppercase:$('uppercaseInput').checked, decimals:Number($('decimalsInput').value),
+      footerPrefix:$('footerPrefixInput').value.trim(), footerSuffix:$('footerSuffixInput').value.trim(),
+      footerDecimals:Number($('footerDecimalsInput').value),
+      showBadge:$('showBadgeInput').checked, ranges:rangesFromForm(),
+      waterMode:$('waterModeInput').value, waterColor:$('waterColorInput').value,
+      percentMode:$('percentModeInput').value, percentColor:$('percentColorInput').value,
+      percentFirstRange:$('percentFirstRangeInput').checked, wave:$('waveInput').checked,
+      showCard:$('showCardInput').checked, showAxis:$('showAxisInput').checked,
+      fontTitle:Number($('fontTitleInput').value), fontPercentage:Number($('fontPercentageInput').value), fontFooter:Number($('fontFooterInput').value),
+      colorPreset:$('colorPresetInput').value,
+      colors:Object.fromEntries(Object.entries(colorIds).map(([k, id]) => [k, $(id).value])),
+      theme:$('themeInput').value
+    };
+    const fail = m => { $('saveStatus').textContent = m; };
+    if (!Number.isInteger(candidate.minCard) || candidate.minCard < 120 || candidate.minCard > 400) return fail('Largura mínima do cartão: entre 120 e 400.');
+    if (!Number.isInteger(candidate.maxCards) || candidate.maxCards < 1 || candidate.maxCards > 50) return fail('Máximo de cartões: entre 1 e 50.');
+    if (!validRanges(candidate.ranges)) return fail('As faixas precisam estar em ordem crescente, com limite final de até 500%.');
+    if (![candidate.waterColor, candidate.percentColor, candidate.iconColor, ...Object.values(candidate.colors)].every(validColor)) return fail('Confira as cores.');
+
+    const settings = tableau.extensions.settings, previous = settings.get(CONFIG_KEY);
+    saving = true; $('save').disabled = $('close').disabled = true; fail('Salvando…');
+    try{
+      settings.set(CONFIG_KEY, JSON.stringify(candidate)); await settings.saveAsync();
+      config = candidate; void update();
+      fail('Configuração salva. Salve/publique a pasta de trabalho para preservá-la.');
+    }catch(err){
+      if (previous === undefined) settings.erase(CONFIG_KEY); else settings.set(CONFIG_KEY, previous);
+      fail('Não foi possível salvar: ' + errText(err));
+    }finally{ saving = false; $('save').disabled = $('close').disabled = false; }
+  }
+
+  // ===== Leitura de dados =====
+  let specCache = null;
   async function getSpec(){
-    if(!author&&specCache)return specCache;
-    const spec=await sheet.getVisualSpecificationAsync();
-    if(!author)specCache=spec;
+    if (!author && specCache) return specCache;
+    const spec = await sheet.getVisualSpecificationAsync();
+    if (!author) specCache = spec;
     return spec;
   }
-  async function readValue(){
-    const spec=await getSpec(),card=spec.marksSpecifications[spec.activeMarksSpecificationIndex];
-    const encodings=card?card.encodings:[],fieldFor=id=>{const encoding=encodings.find(e=>e.id===id);return encoding&&encoding.field?encoding.field:null;};
-    const valueField=fieldFor('value'),titleField=fieldFor('title'),labelField=fieldFor('label'),limit1Field=fieldFor('limit1');
-    if(!valueField)return {value:null,name:'',dynamic:{title:null,label:null,limit1:null},message:'Arraste uma medida para a entrada Valor no cartão Marcas.'};
-    // Uma única chamada (antes: abrir leitor + ler página + liberar leitor)
-    const page=await sheet.getSummaryDataAsync({ignoreSelection:true,maxRows:2});
-    if(page.data.length>1)return {value:null,name:valueField.name,dynamic:{title:null,label:null,limit1:null},message:'A extensão recebeu mais de uma linha. Ajuste os filtros para deixar um único registro/valor.'};
-    if(!page.data.length)return {value:null,name:valueField.name,dynamic:{title:null,label:null,limit1:null},message:'Sem dados para os filtros atuais.'};
-    const row=page.data[0],cache=new Map();
-    function fieldValue(field,label,allowEmpty=false){
-      if(!field)return undefined;
-      if(!cache.has(field.name)){
-        const column=page.columns.find(c=>c.fieldName===field.name);
-        if(!column)throw new Error(`O campo ${label} (${field.name}) não foi encontrado nos dados da planilha.`);
-        const cell=row[column.index];cache.set(field.name,cell&&cell.value);
-      }
-      const value=cache.get(field.name);
-      if(value===null||value===undefined||value===''){if(allowEmpty)return '';throw new Error(`O campo ${label} está vazio para o registro filtrado.`);}
-      return value;
+  async function readTable(){
+    if (typeof sheet.getSummaryDataReaderAsync === 'function'){
+      const reader = await sheet.getSummaryDataReaderAsync(undefined, {ignoreSelection:true});
+      try{
+        const pages = [];
+        for (let i = 0; i < reader.pageCount; i++) pages.push(await reader.getPageAsync(i));
+        return {columns:pages[0] ? pages[0].columns : [], data:pages.flatMap(p => p.data)};
+      }finally{ await reader.releaseAsync(); }
     }
-    const value=fieldValue(valueField,'Valor');
-    if(!finite(value))throw new Error('A medida da entrada Valor está nula ou não é numérica.');
-    const title=titleField?String(fieldValue(titleField,'Título',true)).trim():null;
-    const label=labelField?String(fieldValue(labelField,'Nome')).trim():null;
-    if(labelField&&!label)throw new Error('O campo Nome está vazio para o registro filtrado.');
-    let limit1=null;
-    if(limit1Field&&config.ranges.length>1){
-      const raw=fieldValue(limit1Field,'Limite da faixa 1');limit1=typeof raw==='number'?raw:Number(raw);
-      if(!finite(limit1)||limit1<=0||limit1>=config.ranges[1].end)throw new Error(`O limite da faixa 1 precisa ser maior que 0 e menor que ${number(config.ranges[1].end,2)}%.`);
-    }
-    return {value,name:valueField.name,dynamic:{title,label,limit1},message:''};
+    const t = await sheet.getSummaryDataAsync({ignoreSelection:true});
+    return {columns:t.columns, data:t.data};
   }
-  // ===== FIM DA ALTERAÇÃO =====
 
-  async function update(){pending=true;if(running)return;running=true;try{while(pending){pending=false;try{const result=await readValue();current=result.value;fieldName=result.name;dynamic=result.dynamic||{title:null,label:null,limit1:null};dataMessage=result.message;}catch(err){current=null;dynamic={title:null,label:null,limit1:null};dataMessage='Não foi possível ler os campos da planilha: '+String(err.message||err);}if(!pending)render();}}finally{running=false;}}
-  function syncColorControls(event){const preset=$('colorPresetInput').value;if(event&&palettes[preset])for(const [key,value] of Object.entries(palettes[preset]))$(`color${key[0].toUpperCase()}${key.slice(1)}Input`).value=value;const enabled=preset==='custom';for(const id of ['colorWallsInput','colorEmptyInput','colorEdgeInput','colorTitleInput','colorLabelInput'])$(id).disabled=!enabled;}
-  $('colorPresetInput').addEventListener('change',syncColorControls);
-  function updateSizeOutputs(){for(const [id,out] of [['poolZoomInput','poolZoomValue'],['fontTitleInput','fontTitleValue'],['fontPercentageInput','fontPercentageValue'],['fontLabelInput','fontLabelValue']])$(out).textContent=$(id).value+(id==='poolZoomInput'?'%':' px');}
-  for(const id of ['poolZoomInput','fontTitleInput','fontPercentageInput','fontLabelInput'])$(id).addEventListener('input',updateSizeOutputs);
-  $('addRange').addEventListener('click',addRange);
-  $('configure').addEventListener('click',openConfig);$('close').addEventListener('click',()=>$('settingsPanel').hidden=true);$('settingsForm').addEventListener('submit',saveConfig);
-  async function init(){try{
-    if(!window.tableau)throw new Error('Biblioteca Tableau não carregou. Verifique a pasta vendor.');
-    if(window.self===window.top)throw new Error('Adicione o arquivo .trex pelo cartão Marcas de uma planilha Tableau.');
-    await tableau.extensions.initializeAsync({configure:openConfig});
-    if(!tableau.extensions.worksheetContent)throw new Error('Use uma extensão de visualização no Tableau 2024.2 ou posterior.');
-    sheet=tableau.extensions.worksheetContent.worksheet;author=tableau.extensions.environment.mode==='authoring';config=readConfig();$('configure').hidden=!author;
-    observeContainerSize();sheet.addEventListener(tableau.TableauEventType.SummaryDataChanged,update);await update();
-  }catch(err){dataMessage=String(err.message||err);render();$('notice').textContent=dataMessage;}}
+  async function readItems(){
+    const spec = await getSpec(), card = spec.marksSpecifications[spec.activeMarksSpecificationIndex];
+    const enc = card ? card.encodings : [], fieldFor = id => { const e = enc.find(x => x.id === id); return e && e.field ? e.field : null; };
+    const valueField = fieldFor('value'), titleField = fieldFor('title'), labelField = fieldFor('label'), limit1Field = fieldFor('limit1');
+    if (!valueField) return {items:[], message:'Arraste uma medida para a entrada Valor no cartão Marcas.'};
+    if (!titleField) return {items:[], message:'Arraste a dimensão do reservatório para a entrada Título no cartão Marcas.'};
+
+    const table = await readTable();
+    if (!table.data.length) return {items:[], message:'Sem dados para os filtros atuais.'};
+    const colIndex = field => {
+      if (!field) return -1;
+      const col = table.columns.find(c => c.fieldName === field.name);
+      if (!col) throw new Error(`O campo ${field.name} não foi encontrado nos dados da planilha.`);
+      return col.index;
+    };
+    const iv = colIndex(valueField), it = colIndex(titleField), il = colIndex(labelField), im = colIndex(limit1Field);
+    const get = (row, i) => { if (i < 0) return undefined; const c = row[i]; return c ? c.value : null; };
+    const shown = (row, i) => { const c = row[i]; return c ? String(c.formattedValue ?? c.value) : ''; };
+
+    const map = new Map(), out = [];
+    for (const row of table.data){
+      const title = isNull(get(row, it)) ? '(sem nome)' : shown(row, it).trim();
+      const key = title.toLocaleLowerCase('pt-BR');
+      if (map.has(key)){ map.get(key).dupes++; continue; }
+      // Erros de uma linha ficam restritos ao cartão dela.
+      const item = {key, title, value:null, label:null, limit1:null, error:'', dupes:0};
+      try{
+        const v = get(row, iv);
+        if (finite(v)) item.value = v; else item.error = 'Valor nulo ou não numérico.';
+        if (il >= 0){ const l = get(row, il); item.label = finite(l) ? l : (isNull(l) ? null : String(l).trim()); }
+        if (im >= 0 && config.ranges.length > 1){
+          const raw = get(row, im), n = typeof raw === 'number' ? raw : Number(raw);
+          if (isNull(raw)){ /* sem limite: usa o padrão */ }
+          else if (!finite(n) || n <= 0 || n >= config.ranges[1].end) item.error = `Limite faixa 1 inválido (${raw}); usando o padrão.`;
+          else item.limit1 = n;
+        }
+      }catch(e){ item.error = errText(e); }
+      map.set(key, item); out.push(item);
+    }
+    for (const item of out) if (item.dupes){
+      item.value = null;
+      item.error = `${item.dupes + 1} linhas para este reservatório. Retire dimensões extras do cartão Marcas.`;
+    }
+    return {items:out, message:''};
+  }
+
+  async function update(){
+    pending = true; if (running) return; running = true;
+    try{
+      while (pending){
+        pending = false;
+        try{ const r = await readItems(); items = r.items; globalMessage = r.message; }
+        catch(err){ items = []; globalMessage = 'Não foi possível ler os campos: ' + errText(err); }
+        if (!pending) render();
+      }
+    }finally{ running = false; }
+  }
+
+  // ===== Eventos =====
+  $('colorPresetInput').addEventListener('change', syncColorControls);
+  ['waterModeInput','percentModeInput','columnsInput'].forEach(id => $(id).addEventListener('change', syncModes));
+  for (const [i] of sizes) $(i).addEventListener('input', updateSizeOutputs);
+  $('addRange').addEventListener('click', addRange);
+  $('configure').addEventListener('click', openConfig);
+  $('close').addEventListener('click', closeConfig);
+  $('settingsForm').addEventListener('submit', saveConfig);
+  document.addEventListener('visibilitychange', () => document.body.classList.toggle('page-hidden', document.hidden));
+  if ('ResizeObserver' in window){
+    let raf = 0;
+    new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(layout); }).observe($('grid'));
+  } else window.addEventListener('resize', layout);
+
+  async function init(){
+    try{
+      if (!window.tableau) throw new Error('Biblioteca Tableau não carregou. Verifique a pasta vendor.');
+      if (window.self === window.top) throw new Error('Adicione o arquivo .trex pelo cartão Marcas de uma planilha Tableau.');
+      await tableau.extensions.initializeAsync({configure:openConfig});
+      if (!tableau.extensions.worksheetContent) throw new Error('Use uma extensão de visualização no Tableau 2024.2 ou posterior.');
+      sheet = tableau.extensions.worksheetContent.worksheet;
+      author = tableau.extensions.environment.mode === 'authoring';
+      config = readConfig(); $('configure').hidden = !author;
+      sheet.addEventListener(tableau.TableauEventType.SummaryDataChanged, update);
+      await update();
+    }catch(err){ globalMessage = errText(err); render(); }
+  }
+  render();
   void init();
 })();
