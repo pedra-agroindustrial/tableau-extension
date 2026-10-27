@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Card Grade — indicadores</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css?v=1.0.0">
+<script defer src="vendor/tableau.extensions.js"></script>
+<script defer src="app.js?v=1.0.0"></script>
+</head>
+<body class="light">
+<button id="configure" type="button" hidden>Configurar</button>
+<main id="main">
+  <div id="grid" class="grid" aria-live="polite"></div>
+  <p id="notice" role="status">Conectando ao Tableau…</p>
+</main>
+
+<!-- Biblioteca de ícones (todos em 32×32, cor pelo CSS) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="ic-cana" viewBox="0 0 32 32"><path d="M6 30 9 6M9 6l1-3M7.5 18h3M8.2 12h3M6.8 24h3M14 30l3-21M17 9l1-3M15.3 21h3M16 15h3M22 30l2-17M24 13l1-3M22.5 24h3M23.2 19h3" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"/></symbol>
+  <symbol id="ic-folha" viewBox="0 0 32 32"><path d="M15 29c0-9 0-14 9-21-1 9-3 14-9 16M15 23c-1-6-4-9-11-11 0 7 4 11 11 11" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="ic-frasco" viewBox="0 0 32 32"><path d="M12 3h8M13 3v9L5 26a2.5 2.5 0 0 0 2 4h18a2.5 2.5 0 0 0 2-4l-8-14V3" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"/><path d="M8.5 21h15l3 5a1 1 0 0 1-1 1.5h-19a1 1 0 0 1-1-1.5Z" fill="currentColor"/></symbol>
+  <symbol id="ic-fabrica" viewBox="0 0 32 32"><path d="M2 30V13l7 4v-4l7 4v-4l7 4V4h5v26Z" fill="currentColor"/><path d="M7 22h3v3H7zM13 22h3v3h-3zM19 22h3v3h-3z" fill="#fff"/></symbol>
+  <symbol id="ic-gota" viewBox="0 0 32 32"><path d="M16 3s-9 11-9 17a9 9 0 0 0 18 0c0-6-9-17-9-17Z" fill="currentColor"/></symbol>
+  <symbol id="ic-raio" viewBox="0 0 32 32"><path d="M18 2 6 18h8l-2 12 12-16h-8Z" fill="currentColor"/></symbol>
+  <symbol id="ic-caminhao" viewBox="0 0 32 32"><path d="M2 8h17v14H2zM19 13h6l5 5v4H19z" fill="currentColor"/><circle cx="8" cy="25" r="3" fill="currentColor" stroke="#fff" stroke-width="1.5"/><circle cx="24" cy="25" r="3" fill="currentColor" stroke="#fff" stroke-width="1.5"/></symbol>
+  <symbol id="ic-grafico" viewBox="0 0 32 32"><path d="M4 28h24M7 24v-7M13 24V10M19 24v-9M25 24V5" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"/></symbol>
+</svg>
+
+<template id="cardTemplate">
+  <article class="card">
+    <svg class="icon" aria-hidden="true"><use href=""/></svg>
+    <div class="body">
+      <h2 class="title"></h2>
+      <div class="value"></div>
+      <div class="delta"><span class="arrow"></span><span class="delta-text"></span></div>
+      <div class="detail"></div>
+      <p class="card-error" hidden></p>
+    </div>
+  </article>
+</template>
+
+<section id="settingsPanel" hidden aria-label="Configuração dos cards">
+  <form id="settingsForm" novalidate>
+    <h2>Configurar cards</h2>
+    <p class="hint">Entradas: <strong>Título</strong> (nome do indicador — 1 card por valor, pode ter ORDEM junto), <strong>Valor</strong>, <strong>Variação</strong> (opcional) e <strong>Detalhe</strong> (opcional, texto da última linha).</p>
+
+    <fieldset class="group"><legend>Cards</legend>
+      <p class="hint">Ícone, formato e tipo de variação de cada indicador. Abra o Configurar depois de arrastar os campos.</p>
+      <div id="cardsContainer"></div>
+    </fieldset>
+
+    <fieldset class="group"><legend>Textos padrão</legend>
+      <label>Detalhe padrão (quando não houver campo Detalhe)<input id="detailInput" maxlength="80"></label>
+      <label class="checkbox"><input id="uppercaseInput" type="checkbox"> Títulos em MAIÚSCULAS</label>
+    </fieldset>
+
+    <fieldset class="group"><legend>Grade</legend>
+      <div class="two">
+        <label>Colunas<select id="columnsInput"><option value="0">Automático</option><option>1</option><option>2</option><option>3</option><option>4</option><option>5</option><option>6</option><option>7</option><option>8</option></select></label>
+        <label>Largura mínima do card<input id="minCardInput" type="number" min="140" max="500" step="10"></label>
+      </div>
+      <label>Espaço entre cards: <output id="gapValue"></output><input id="gapInput" type="range" min="0" max="32" step="1"></label>
+    </fieldset>
+
+    <fieldset class="group"><legend>Fontes</legend>
+      <label>Título: <output id="fontTitleValue"></output><input id="fontTitleInput" type="range" min="8" max="20" step="1"></label>
+      <label>Valor: <output id="fontValueValue"></output><input id="fontValueInput" type="range" min="14" max="48" step="1"></label>
+      <label>Variação e detalhe: <output id="fontSmallValue"></output><input id="fontSmallInput" type="range" min="8" max="16" step="1"></label>
+      <label>Ícone: <output id="iconSizeValue"></output><input id="iconSizeInput" type="range" min="18" max="56" step="1"></label>
+    </fieldset>
+
+    <fieldset class="group"><legend>Cores</legend>
+      <div class="color-grid">
+        <label>Ícone e barra lateral<input id="colorAccentInput" type="color"></label>
+        <label>Valor<input id="colorValueInput" type="color"></label>
+        <label>Título<input id="colorTitleInput" type="color"></label>
+        <label>Detalhe<input id="colorMutedInput" type="color"></label>
+        <label>Variação positiva<input id="colorUpInput" type="color"></label>
+        <label>Variação negativa<input id="colorDownInput" type="color"></label>
+        <label>Fundo do card<input id="colorCardInput" type="color"></label>
+      </div>
+      <label class="checkbox"><input id="accentBarInput" type="checkbox"> Barra colorida à esquerda do card</label>
+      <label class="checkbox"><input id="showCardInput" type="checkbox"> Borda, sombra e cantos</label>
+      <label>Fundo da área<select id="themeInput"><option value="light">Branco</option><option value="gray">Cinza claro</option><option value="transparent">Transparente</option></select></label>
+      <button id="resetColors" type="button">Restaurar cores padrão</button>
+    </fieldset>
+
+    <p id="saveStatus" role="status"></p>
+    <div class="actions"><button id="close" type="button">Fechar</button><button id="save" type="submit">Salvar configuração</button></div>
+  </form>
+</section>
+</body>
+</html>
