@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Rosca de Participação</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css?v=1.0.0">
+<script defer src="vendor/tableau.extensions.js"></script>
+<script defer src="app.js?v=1.0.0"></script>
+</head>
+<body class="light card-on">
+<button id="configure" type="button" hidden>Configurar</button>
+<main>
+  <section class="panel">
+    <header class="section-head">
+      <svg class="section-icon" viewBox="0 0 32 32" aria-hidden="true"><path d="M14 4a12 12 0 1 0 14 14H14Z" fill="currentColor"/><path d="M17 1v14h14A14 14 0 0 0 17 1Z" fill="currentColor"/></svg>
+      <div class="head-text"><h1 id="sectionTitle"></h1><div id="sectionSubtitle"></div></div>
+    </header>
+    <div class="body-row">
+      <div id="chart" class="chart"><svg id="svg"></svg></div>
+      <div id="legendList" class="legend-list"></div>
+    </div>
+    <p id="notice" role="status">Conectando ao Tableau…</p>
+  </section>
+</main>
+
+<section id="settingsPanel" hidden aria-label="Configuração da rosca">
+  <form id="settingsForm" novalidate>
+    <h2>Configurar rosca</h2>
+    <p class="hint">Entradas: <strong>Categoria</strong> (NOME_USINA, opcionalmente com ORDEM_COLUNA) e <strong>Valor</strong> (CANA).</p>
+    <fieldset class="group"><legend>Cabeçalho</legend>
+      <label class="checkbox"><input id="showHeaderInput" type="checkbox"> Exibir cabeçalho</label>
+      <label>Título<input id="titleInput" maxlength="80"></label>
+      <label>Subtítulo<input id="subtitleInput" maxlength="120"></label>
+    </fieldset>
+    <fieldset class="group"><legend>Dados</legend>
+      <label>Ignorar categorias (separe por vírgula)<input id="excludeInput" maxlength="200"></label>
+      <label class="checkbox"><input id="titleCaseInput" type="checkbox"> Nomes em "Título" (USINA DA PEDRA → Usina da Pedra)</label>
+      <label>Ordenação<select id="sortInput"><option value="desc">Maior valor primeiro</option><option value="tableau">Ordem do Tableau</option><option value="alpha">Alfabética</option></select></label>
+      <div class="two"><label>Unidade<input id="unitInput" maxlength="10"></label><label>Decimais do valor<select id="decimalsInput"><option>0</option><option>1</option><option>2</option></select></label></div>
+      <label>Decimais do percentual<select id="pctDecimalsInput"><option>0</option><option>1</option><option>2</option></select></label>
+    </fieldset>
+    <fieldset class="group"><legend>Rosca</legend>
+      <label>Texto do centro<input id="centerLabelInput" maxlength="40"></label>
+      <label>Espessura: <output id="thicknessValue"></output><input id="thicknessInput" type="range" min="15" max="60" step="1"></label>
+      <label class="checkbox"><input id="showSliceLabelsInput" type="checkbox"> Percentual ao lado das fatias</label>
+      <label class="checkbox"><input id="showLegendInput" type="checkbox"> Legenda com valor e percentual</label>
+      <label>Cores das fatias (na ordem, uma por linha)<textarea id="paletteInput" rows="4"></textarea></label>
+      <label>Cor das categorias com valor 0<input id="colorZeroInput" type="color"></label>
+    </fieldset>
+    <fieldset class="group"><legend>Aparência</legend>
+      <div class="color-grid"><label>Ícone<input id="colorAccentInput" type="color"></label><label>Textos<input id="colorTextInput" type="color"></label></div>
+      <label>Fonte: <output id="fontValue"></output><input id="fontInput" type="range" min="9" max="18" step="1"></label>
+      <label class="checkbox"><input id="showCardInput" type="checkbox"> Borda, sombra e cantos</label>
+      <label>Fundo da área<select id="themeInput"><option value="light">Branco</option><option value="gray">Cinza claro</option><option value="transparent">Transparente</option></select></label>
+    </fieldset>
+    <p id="saveStatus" role="status"></p>
+    <div class="actions"><button id="close" type="button">Fechar</button><button id="save" type="submit">Salvar configuração</button></div>
+  </form>
+</section>
+</body>
+</html>
