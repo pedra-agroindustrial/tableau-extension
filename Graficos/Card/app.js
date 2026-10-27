@@ -1,29 +1,34 @@
 (() => {
   'use strict';
   const $ = id => document.getElementById(id);
-  const CONFIG_KEY = 'pivotTableConfig';
-  const CONFIG_VERSION = 2;          // v1.1: totais vêm da base por padrão
-  const MAX_MEASURES = 8, MAX_COLS = 40, MAX_ROWS = 300;
-  const defaultColors = {head:'#1e7b34', headText:'#ffffff', total:'#e6f4ea', text:'#1f2933'};
+  const CONFIG_KEY = 'kpiCardConfig';
+  const CONFIG_VERSION = 1;
+  const MAX_CARDS = 24;
+  const ICONS = [['cana','Cana'],['folha','Folha'],['frasco','Frasco'],['fabrica','Fábrica'],['gota','Gota'],['raio','Energia'],['caminhao','Caminhão'],['grafico','Gráfico']];
+  const DELTA_MODES = [['pct','%'],['pp','p.p.'],['abs','Absoluta'],['none','Sem variação']];
+  const defaultColors = {accent:'#1e7b34', value:'#17324a', title:'#1f2933', muted:'#6b7480', up:'#1e8e3e', down:'#d32f2f', card:'#ffffff'};
 
   const defaults = {
     version:CONFIG_VERSION,
-    showHeader:true, sectionTitle:'CONSOLIDADO POR HORA E UNIDADE',
-    sectionNote:'Valores em toneladas (t), fibra (%) e ATR', iconColor:'#1e7b34',
-    measures:{},                       // por nome do campo: {label, decimals, total, weight}
-    totalColMode:'last', totalColLabel:'TOTAL',
-    totalRowMode:'label', totalRowLabel:'Total',
-    rowHeader:'Hora', empty:'zero', fontSize:12, dimZeros:true, zebra:false, fillHeight:true, upperGroups:true,
-    colors:{...defaultColors}, theme:'light'
+    cards:{},                     // por título: {icon, suffix, decimals, deltaMode, deltaDecimals}
+    detail:'em relação ao mesmo horário de ontem', uppercase:true,
+    columns:0, minCard:220, gap:12,
+    fontTitle:11, fontValue:30, fontSmall:10, iconSize:36,
+    colors:{...defaultColors}, accentBar:true, showCard:true, theme:'light'
   };
+  // Sugestões automáticas pelo nome do indicador (podem ser trocadas no Configurar)
   const KNOWN = [
-    {re:/CANA/i,  m:{label:'Cana (t)',  decimals:0, total:'sum'}},
-    {re:/FIBRA/i, m:{label:'Fibra (%)', decimals:2, total:'wavg', weightHint:/CANA/i}},
-    {re:/ATR/i,   m:{label:'ATR',       decimals:2, total:'wavg', weightHint:/CANA/i}}
+    {re:/CANA/i,               c:{icon:'cana',    suffix:'t', decimals:0, deltaMode:'pct', deltaDecimals:0}},
+    {re:/FIBRA/i,              c:{icon:'folha',   suffix:'%', decimals:2, deltaMode:'pp',  deltaDecimals:1}},
+    {re:/ATR/i,                c:{icon:'frasco',  suffix:'',  decimals:2, deltaMode:'abs', deltaDecimals:1}},
+    {re:/USINA|UNIDADE/i,      c:{icon:'fabrica', suffix:'',  decimals:0, deltaMode:'none',deltaDecimals:0}},
+    {re:/VAZ|ÁGUA|AGUA|NÍVEL|NIVEL/i, c:{icon:'gota', suffix:'', decimals:1, deltaMode:'pct', deltaDecimals:0}},
+    {re:/ENERGIA|MOTOR|MW|KW/i, c:{icon:'raio',   suffix:'', decimals:1, deltaMode:'pct', deltaDecimals:0}}
   ];
 
   let config = clone(defaults), sheet, author = false, saving = false, running = false, pending = false;
-  let model = null, globalMessage = '';
+  let items = [], globalMessage = '';
+  const cards = new Map();
 
   function clone(o){ return JSON.parse(JSON.stringify(o)); }
   const validColor = c => typeof c === 'string' && /^#[0-9a-fA-F]{6}$/.test(c);
@@ -34,10 +39,9 @@
   const str = (v, max, fb) => typeof v === 'string' ? v.slice(0, max) : fb;
   const errText = e => String((e && e.message) || e);
   const isNull = v => v === null || v === undefined || v === '' || v === '%null%';
-  const norm = s => String(s).trim().toLocaleUpperCase('pt-BR');
   const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
   const fmt = (n, d) => n.toLocaleString('pt-BR', {minimumFractionDigits:d, maximumFractionDigits:d});
-  const bareName = n => { const m = /^[^(]*\((.*)\)$/.exec(String(n)); return (m ? m[1] : String(n)).trim(); };
+  const iconIds = ICONS.map(i => i[0]), deltaIds = DELTA_MODES.map(d => d[0]);
 
   // ===== Configuração =====
   function readConfig(){
@@ -45,62 +49,104 @@
     if (!raw) return clone(defaults);
     try{
       const c = JSON.parse(raw), d = clone(defaults);
-      const measures = {};
-      if (c.measures && typeof c.measures === 'object') for (const [k, m] of Object.entries(c.measures)){
-        measures[k] = {label:str(m.label, 30, bareName(k)), decimals:intIn(m.decimals, 0, 4, 2),
-          total:oneOf(m.total, ['sum','avg','wavg','min','max','none'], 'sum'), weight:str(m.weight, 200, '')};
-      }
-      // config da v1.0 (sem os modos de total): aproveita textos/medidas/cores e assume totais da base
+      if (c.version !== CONFIG_VERSION) return d;
+      const cardsCfg = {};
+      if (c.cards && typeof c.cards === 'object') for (const [k, v] of Object.entries(c.cards)) cardsCfg[k] = sanitizeCard(v);
       return {
-        version:CONFIG_VERSION,
-        showHeader:bool(c.showHeader, d.showHeader), sectionTitle:str(c.sectionTitle, 80, d.sectionTitle),
-        sectionNote:str(c.sectionNote, 120, d.sectionNote), iconColor:validColor(c.iconColor) ? c.iconColor : d.iconColor,
-        measures,
-        totalColMode:oneOf(c.totalColMode, ['last','label','calc','none'], d.totalColMode), totalColLabel:str(c.totalColLabel, 30, d.totalColLabel),
-        totalRowMode:oneOf(c.totalRowMode, ['label','calc','none'], d.totalRowMode), totalRowLabel:str(c.totalRowLabel, 30, d.totalRowLabel),
-        rowHeader:str(c.rowHeader, 30, d.rowHeader), empty:oneOf(c.empty, ['zero','dash','blank'], d.empty),
-        fontSize:intIn(c.fontSize, 9, 22, d.fontSize), dimZeros:bool(c.dimZeros, d.dimZeros), zebra:bool(c.zebra, d.zebra),
-        fillHeight:bool(c.fillHeight, d.fillHeight), upperGroups:bool(c.upperGroups, d.upperGroups),
+        version:CONFIG_VERSION, cards:cardsCfg,
+        detail:str(c.detail, 80, d.detail), uppercase:bool(c.uppercase, d.uppercase),
+        columns:intIn(c.columns, 0, 8, d.columns), minCard:intIn(c.minCard, 140, 500, d.minCard), gap:intIn(c.gap, 0, 32, d.gap),
+        fontTitle:intIn(c.fontTitle, 8, 20, d.fontTitle), fontValue:intIn(c.fontValue, 14, 48, d.fontValue),
+        fontSmall:intIn(c.fontSmall, 8, 16, d.fontSmall), iconSize:intIn(c.iconSize, 18, 56, d.iconSize),
         colors:Object.fromEntries(Object.keys(defaultColors).map(k => [k, validColor(c.colors?.[k]) ? c.colors[k] : d.colors[k]])),
+        accentBar:bool(c.accentBar, d.accentBar), showCard:bool(c.showCard, d.showCard),
         theme:oneOf(c.theme, ['light','gray','transparent'], d.theme)
       };
     }catch(_){ return clone(defaults); }
   }
-
-  function measureCfg(name, allNames){
-    if (config.measures[name]) return config.measures[name];
-    const k = KNOWN.find(x => x.re.test(bareName(name)));
-    const base = {label:bareName(name), decimals:2, total:'sum', weight:''};
-    if (!k) return base;
-    const m = {...base, ...k.m};
-    if (m.weightHint){ m.weight = allNames.find(n => n !== name && m.weightHint.test(bareName(n))) || ''; if (!m.weight) m.total = 'avg'; }
-    delete m.weightHint;
-    return m;
+  function sanitizeCard(v){
+    v = v || {};
+    return {icon:oneOf(v.icon, iconIds, 'grafico'), suffix:str(v.suffix, 12, ''), decimals:intIn(v.decimals, 0, 4, 1),
+      deltaMode:oneOf(v.deltaMode, deltaIds, 'pct'), deltaDecimals:intIn(v.deltaDecimals, 0, 3, 1)};
+  }
+  function cardCfg(title){
+    if (config.cards[title]) return config.cards[title];
+    const k = KNOWN.find(x => x.re.test(title));
+    return sanitizeCard(k ? k.c : {});
   }
 
-  // ===== Totais calculados (só quando o modo for "calc") =====
-  function aggregate(cells, name, cfg){
-    const vals = cells.map(c => c ? c[name] : null).filter(finite);
-    if (!vals.length || cfg.total === 'none') return null;
-    switch (cfg.total){
-      case 'sum': return vals.reduce((a, b) => a + b, 0);
-      case 'avg': return vals.reduce((a, b) => a + b, 0) / vals.length;
-      case 'min': return Math.min(...vals);
-      case 'max': return Math.max(...vals);
-      case 'wavg':{
-        let sw = 0, swv = 0;
-        for (const c of cells){
-          if (!c || !finite(c[name])) continue;
-          const w = finite(c[cfg.weight]) ? c[cfg.weight] : 0;
-          sw += w; swv += w * c[name];
-        }
-        return sw !== 0 ? swv / sw : 0;
-      }
-    }
-    return null;
+  // ===== Formatação =====
+  function valueText(item, cfg){
+    if (typeof item.value === 'string') return item.value;           // ex.: "2 de 4" vindo da base
+    if (!finite(item.value)) return '—';
+    return fmt(item.value, cfg.decimals) + (cfg.suffix ? (cfg.suffix === '%' ? ' %' : ' ' + cfg.suffix) : '');
+  }
+  function deltaInfo(item, cfg){
+    if (cfg.deltaMode === 'none' || !finite(item.delta)) return null;
+    const v = item.delta, dir = v > 0 ? 'up' : v < 0 ? 'down' : 'flat';
+    const sign = v > 0 ? '+ ' : v < 0 ? '− ' : '';
+    const unit = cfg.deltaMode === 'pct' ? '%' : cfg.deltaMode === 'pp' ? ' p.p.' : '';
+    return {dir, text:sign + fmt(Math.abs(v), cfg.deltaDecimals) + unit};
   }
 
-  // ===== Leitura de dados =====
+  // ===== Cartões =====
+  function createCard(){
+    const node = $('cardTemplate').content.firstElementChild.cloneNode(true);
+    const q = s => node.querySelector(s);
+    return {node, use:q('use'), title:q('.title'), value:q('.value'), delta:q('.delta'), deltaText:q('.delta-text'), detail:q('.detail'), error:q('.card-error')};
+  }
+  function paintCard(c, item){
+    const cfg = cardCfg(item.title);
+    c.use.setAttribute('href', '#ic-' + cfg.icon);
+    c.title.textContent = item.title; c.title.title = item.title;
+    const vt = valueText(item, cfg);
+    c.value.textContent = vt; c.value.title = vt;
+    const d = deltaInfo(item, cfg);
+    c.delta.className = 'delta ' + (d ? d.dir : 'none');
+    c.deltaText.textContent = d ? d.text : '';
+    c.detail.textContent = item.detail !== null ? item.detail : config.detail;
+    c.error.textContent = item.error || ''; c.error.hidden = !item.error;
+    c.node.classList.toggle('has-error', !!item.error);
+    c.node.setAttribute('aria-label', `${item.title}: ${vt}${d ? ', variação ' + d.text : ''}`);
+  }
+
+  function applyGlobalStyle(){
+    const body = document.body, root = document.documentElement, col = config.colors;
+    const set = (k, v) => root.style.setProperty(k, v);
+    for (const [k, v] of Object.entries(col)) set('--' + k, v);
+    set('--fs-title', config.fontTitle + 'px'); set('--fs-value', config.fontValue + 'px');
+    set('--fs-small', config.fontSmall + 'px'); set('--icon', config.iconSize + 'px'); set('--gap', config.gap + 'px');
+    for (const t of ['gray','transparent']){ root.classList.toggle(t, config.theme === t); body.classList.toggle(t, config.theme === t); }
+    body.classList.toggle('card-on', config.showCard);
+    body.classList.toggle('bar-on', config.accentBar);
+    body.classList.toggle('upper', config.uppercase);
+  }
+  function layout(){
+    const grid = $('grid'), n = grid.children.length;
+    if (!n) return;
+    const w = grid.clientWidth, h = grid.clientHeight, gap = config.gap;
+    let cols = config.columns || Math.max(1, Math.floor((w + gap) / (config.minCard + gap)));
+    cols = Math.min(cols, n);
+    const rows = Math.ceil(n / cols);
+    grid.style.setProperty('--cols', cols); grid.style.setProperty('--rows', rows);
+    const cw = (w - gap * (cols - 1)) / cols;
+    for (const el of grid.children){ el.classList.toggle('compact', cw < 200); el.classList.toggle('tiny', cw < 150); }
+  }
+  function render(){
+    applyGlobalStyle();
+    const grid = $('grid'), visible = items.slice(0, MAX_CARDS), keep = new Set(visible.map(i => i.key));
+    for (const [k, c] of cards) if (!keep.has(k)){ c.node.remove(); cards.delete(k); }
+    visible.forEach((item, idx) => {
+      let c = cards.get(item.key);
+      if (!c){ c = createCard(); cards.set(item.key, c); }
+      try{ paintCard(c, item); }catch(e){ c.error.textContent = 'Erro ao desenhar: ' + errText(e); c.error.hidden = false; }
+      if (grid.children[idx] !== c.node) grid.insertBefore(c.node, grid.children[idx] || null);
+    });
+    $('notice').textContent = globalMessage || (items.length > MAX_CARDS ? `Exibindo ${MAX_CARDS} de ${items.length} indicadores.` : '');
+    layout();
+  }
+
+  // ===== Dados =====
   let specCache = null;
   async function getSpec(){
     if (!author && specCache) return specCache;
@@ -120,266 +166,121 @@
     const t = await sheet.getSummaryDataAsync({ignoreSelection:true});
     return {columns:t.columns, data:t.data};
   }
+  const bareName = n => { const m = /^[^(]*\((.*)\)$/.exec(String(n)); return (m ? m[1] : String(n)).trim(); };
 
-  async function readModel(){
+  async function readItems(){
     const spec = await getSpec(), card = spec.marksSpecifications[spec.activeMarksSpecificationIndex];
     const enc = card ? card.encodings : [];
     const fieldsOf = id => enc.filter(e => e.id === id).flatMap(e => e.fields ? e.fields : (e.field ? [e.field] : []));
-    const rowFields = fieldsOf('row'), colFields = fieldsOf('col');
-    const fMeasures = fieldsOf('measure').slice(0, MAX_MEASURES);
-    if (!rowFields.length) return {message:'Arraste ORDEM_LINHA e HORA para a entrada Linha.'};
-    if (!fMeasures.length) return {message:'Arraste as medidas (ex.: CANA, FIBRA, ATR) para a entrada Medidas.'};
+    const fTitles = fieldsOf('title'), fValue = fieldsOf('value')[0], fDelta = fieldsOf('delta')[0], fDetail = fieldsOf('detail')[0];
+    if (!fTitles.length) return {items:[], message:'Arraste o nome do indicador para a entrada Título.'};
+    if (!fValue) return {items:[], message:'Arraste o valor para a entrada Valor.'};
 
     const table = await readTable();
-    if (!table.data.length) return {message:'Sem dados para os filtros atuais.'};
+    if (!table.data.length) return {items:[], message:'Sem dados para os filtros atuais.'};
     const colOf = f => {
-      let col = table.columns.find(c => c.fieldName === f.name);
-      if (!col) col = table.columns.find(c => bareName(c.fieldName) === bareName(f.name));
+      let col = table.columns.find(c => c.fieldName === f.name) || table.columns.find(c => bareName(c.fieldName) === bareName(f.name));
       if (!col) throw new Error(`O campo ${f.name} não foi encontrado nos dados da planilha.`);
       return col;
     };
-    const isNumType = col => /^(int|float|real|number|integer|double)/i.test(String(col.dataType || ''));
-    // Com 2 campos na entrada: o numérico é a ORDEM e o texto é o RÓTULO, em qualquer ordem das pílulas.
-    const pair = fields => {
-      if (!fields.length) return {label:-1, order:-1};
-      if (fields.length === 1) return {label:colOf(fields[0]).index, order:-1};
-      const a = colOf(fields[0]), b = colOf(fields[1]);
-      if (isNumType(a) && !isNumType(b)) return {label:b.index, order:a.index};
-      if (isNumType(b) && !isNumType(a)) return {label:a.index, order:b.index};
-      return {label:b.index, order:a.index};
-    };
-    const R = pair(rowFields), C = pair(colFields);
-    const mIdx = fMeasures.map(f => ({name:f.name, i:colOf(f).index}));
-    const raw = (row, i) => { const c = row[i]; return c ? c.value : null; };
-    const shown = (row, i) => { const c = row[i]; return c ? String(c.formattedValue ?? c.value).trim() : ''; };
-    const ordKey = v => finite(v) ? v : (isNull(v) ? Infinity : (Number.isFinite(Number(v)) ? Number(v) : String(v)));
+    const isNum = col => /^(int|float|real|number|integer|double)/i.test(String(col.dataType || ''));
+    // Título com 2 campos: o numérico é a ORDEM dos cards, o texto é o nome
+    let iTitle, iOrder = -1;
+    if (fTitles.length >= 2){
+      const a = colOf(fTitles[0]), b = colOf(fTitles[1]);
+      if (isNum(a) && !isNum(b)){ iTitle = b.index; iOrder = a.index; }
+      else if (isNum(b) && !isNum(a)){ iTitle = a.index; iOrder = b.index; }
+      else { iTitle = b.index; iOrder = a.index; }
+    }else iTitle = colOf(fTitles[0]).index;
+    const iValue = colOf(fValue).index, iDelta = fDelta ? colOf(fDelta).index : -1, iDetail = fDetail ? colOf(fDetail).index : -1;
+    const raw = (r, i) => { const c = r[i]; return c ? c.value : null; };
+    const shown = (r, i) => { const c = r[i]; return c ? String(c.formattedValue ?? c.value).trim() : ''; };
 
-    const rows = new Map(), cols = new Map(), cells = new Map();
-    let dupes = 0, seq = 0;
-    // a ORDEM faz parte da chave: os dois "06" (ordens diferentes) nunca se juntam
-    const keyOf = (label, ord) => `${ord === undefined ? '' : String(ord)}\u0001${label}`;
-    for (const r of table.data){
-      const rLabel = isNull(raw(r, R.label)) ? '(vazio)' : shown(r, R.label);
-      const rOrd = R.order >= 0 ? raw(r, R.order) : undefined;
-      const cLabel = C.label >= 0 ? (isNull(raw(r, C.label)) ? '(vazio)' : shown(r, C.label)) : '';
-      const cOrd = C.order >= 0 ? raw(r, C.order) : undefined;
-      const rk = keyOf(rLabel, rOrd), ck = keyOf(cLabel, cOrd);
-      if (!rows.has(rk)) rows.set(rk, {key:rk, label:rLabel, ord:ordKey(rOrd), seq:seq++});
-      if (!cols.has(ck)) cols.set(ck, {key:ck, label:cLabel, ord:ordKey(cOrd), seq:seq++});
-      const cellKey = rk + '\u0002' + ck;
-      if (cells.has(cellKey)){ dupes++; continue; }
-      const cell = {};
-      for (const m of mIdx){ const v = raw(r, m.i); cell[m.name] = finite(v) ? v : null; }
-      cells.set(cellKey, cell);
-    }
-    const byOrder = (a, b) => {
-      if (typeof a.ord === 'number' && typeof b.ord === 'number' && a.ord !== b.ord) return a.ord - b.ord;
-      if (typeof a.ord !== typeof b.ord) return typeof a.ord === 'number' ? -1 : 1;
-      if (typeof a.ord === 'string' && a.ord !== b.ord) return a.ord.localeCompare(b.ord, 'pt-BR', {numeric:true});
-      return a.seq - b.seq;
-    };
-    let rowList = [...rows.values()].sort(byOrder), colList = [...cols.values()].sort(byOrder);
-    let message = '';
-    if (R.order < 0) message = 'Dica: coloque ORDEM_LINHA junto com HORA na entrada Linha para manter a ordem e separar as horas repetidas.';
-    if (rowList.length > MAX_ROWS){ rowList = rowList.slice(0, MAX_ROWS); message = `Exibindo ${MAX_ROWS} linhas. Filtre no Tableau para ver o restante.`; }
-    if (colList.length > MAX_COLS){ colList = colList.slice(0, MAX_COLS); message = `Exibindo ${MAX_COLS} colunas. Filtre no Tableau para ver o restante.`; }
-    if (dupes) message = `${dupes} combinação(ões) Linha × Coluna repetidas foram ignoradas. Retire dimensões extras do cartão Marcas.`;
-    return {
-      rowField:(rowFields[1] || rowFields[0]).name, hasCols:C.label >= 0, measures:mIdx.map(m => m.name),
-      rows:rowList, cols:colList, cell:(rk, ck) => cells.get(rk + '\u0002' + ck) || null, message
-    };
+    const map = new Map(), out = [];
+    table.data.forEach((r, seq) => {
+      const title = isNull(raw(r, iTitle)) ? '(sem nome)' : shown(r, iTitle);
+      const key = title.toLocaleLowerCase('pt-BR');
+      if (map.has(key)){ map.get(key).dupes++; return; }
+      const item = {key, title, value:null, delta:null, detail:null, error:'', dupes:0, seq,
+        ord:iOrder >= 0 && finite(Number(raw(r, iOrder))) ? Number(raw(r, iOrder)) : Infinity};
+      try{
+        const v = raw(r, iValue);
+        if (finite(v)) item.value = v;
+        else if (!isNull(v)) item.value = shown(r, iValue);              // texto: exibido como veio (ex.: "2 de 4")
+        else item.error = 'Valor nulo.';
+        if (iDelta >= 0){ const d = raw(r, iDelta); item.delta = finite(d) ? d : (isNull(d) ? null : Number(String(d).replace(',', '.'))); if (!finite(item.delta)) item.delta = null; }
+        if (iDetail >= 0){ const t = raw(r, iDetail); item.detail = isNull(t) ? null : shown(r, iDetail); }   // vazio: usa o detalhe padrão
+      }catch(e){ item.error = errText(e); }
+      map.set(key, item); out.push(item);
+    });
+    for (const it of out) if (it.dupes){ it.value = null; it.error = `${it.dupes + 1} linhas para este indicador. Retire dimensões extras.`; }
+    out.sort((a, b) => (a.ord - b.ord) || (a.seq - b.seq));
+    return {items:out, message:''};
   }
 
-  // ===== Renderização =====
-  function applyGlobalStyle(){
-    const body = document.body, root = document.documentElement, c = config.colors;
-    root.style.setProperty('--head', c.head); root.style.setProperty('--head-text', c.headText);
-    root.style.setProperty('--total', c.total); root.style.setProperty('--text', c.text);
-    root.style.setProperty('--icon', config.iconColor); root.style.setProperty('--fs', config.fontSize + 'px');
-    for (const t of ['gray','transparent']){ root.classList.toggle(t, config.theme === t); body.classList.toggle(t, config.theme === t); }
-    body.classList.toggle('header-off', !config.showHeader);
-    body.classList.toggle('dim', config.dimZeros);
-    body.classList.toggle('zebra', config.zebra);
-    body.classList.toggle('fill', config.fillHeight);
-    body.classList.toggle('upper', config.upperGroups);
-    $('sectionTitle').textContent = config.sectionTitle;
-    $('sectionNote').textContent = config.sectionNote;
-  }
-
-  function cellHtml(v, cfg, cls){
-    let text, z = false;
-    if (!finite(v)){
-      if (config.empty === 'zero'){ text = fmt(0, cfg.decimals); z = true; }
-      else text = config.empty === 'dash' ? '—' : '';
-    }else{
-      text = fmt(v, cfg.decimals);
-      z = Number(text.replace(/\./g, '').replace(',', '.')) === 0;
-    }
-    const classes = [cls, z ? 'z' : ''].filter(Boolean).join(' ');
-    return `<td${classes ? ` class="${classes}"` : ''}>${esc(text)}</td>`;
-  }
-
-  function render(){
-    applyGlobalStyle();
-    const tbl = $('table');
-    if (!model || !model.rows){ tbl.innerHTML = ''; $('notice').textContent = globalMessage || (model && model.message) || ''; return; }
-
-    const ms = model.measures, cfgs = Object.fromEntries(ms.map(n => [n, measureCfg(n, ms)]));
-    const hasCols = model.hasCols;
-
-    // ---- coluna de total: vem da base (última coluna ou pelo rótulo) ou é calculada ----
-    let dataCols = model.cols.slice(), totalCol = null, calcCol = false;
-    if (hasCols){
-      if (config.totalColMode === 'last' && dataCols.length > 1) totalCol = dataCols.pop();
-      else if (config.totalColMode === 'label'){
-        const i = dataCols.findIndex(c => norm(c.label) === norm(config.totalColLabel));
-        if (i >= 0) totalCol = dataCols.splice(i, 1)[0];
-      }else if (config.totalColMode === 'calc') calcCol = true;
-    }
-    // ---- linha de total: vem da base (pelo rótulo, sempre no fim) ou é calculada ----
-    let dataRows = model.rows.slice(), totalRow = null, calcRow = false;
-    if (config.totalRowMode === 'label'){
-      const i = dataRows.findIndex(r => norm(r.label) === norm(config.totalRowLabel));
-      if (i >= 0) totalRow = dataRows.splice(i, 1)[0];
-    }else if (config.totalRowMode === 'calc') calcRow = true;
-
-    const calcOver = cells => Object.fromEntries(ms.map(n => [n, aggregate(cells, n, cfgs[n])]));
-    const totalColCell = r => totalCol ? model.cell(r.key, totalCol.key) : calcOver(dataCols.map(c => model.cell(r.key, c.key)));
-    const totalRowCell = c => totalRow ? model.cell(totalRow.key, c.key) : calcOver(dataRows.map(r => model.cell(r.key, c.key)));
-    const grandCell = () => {
-      if (totalRow && totalCol) return model.cell(totalRow.key, totalCol.key);
-      if (totalRow) return calcOver(dataCols.map(c => model.cell(totalRow.key, c.key)));
-      if (totalCol) return calcOver(dataRows.map(r => model.cell(r.key, totalCol.key)));
-      const all = []; for (const r of dataRows) for (const c of dataCols) all.push(model.cell(r.key, c.key));
-      return calcOver(all);
-    };
-    const showTotalCol = !!totalCol || calcCol, showTotalRow = !!totalRow || calcRow;
-
-    const nGroups = dataCols.length + (showTotalCol ? 1 : 0);
-    const firstW = Math.max(5, Math.min(12, 60 / (nGroups * ms.length + 1)));
-    document.documentElement.style.setProperty('--w-first', firstW.toFixed(1) + '%');
-    const rowHead = esc(config.rowHeader || bareName(model.rowField));
-
-    let h = '<thead>';
-    const mHeads = tg => ms.map((n, i) => `<th class="m${i === 0 ? ' first' : ''}${tg ? ' tg' : ''}">${esc(cfgs[n].label)}</th>`).join('');
-    if (hasCols){
-      h += `<tr><th class="rowhead" rowspan="2">${rowHead}</th>`;
-      for (const c of dataCols) h += `<th class="grp" colspan="${ms.length}" title="${esc(c.label)}">${esc(c.label)}</th>`;
-      if (showTotalCol) h += `<th class="grp tg" colspan="${ms.length}">${esc(totalCol ? totalCol.label : config.totalColLabel)}</th>`;
-      h += '</tr><tr>';
-      for (const c of dataCols) h += mHeads(false);
-      if (showTotalCol) h += mHeads(true);
-      h += '</tr>';
-    }else{
-      h += `<tr><th class="rowhead">${rowHead}</th>${mHeads(false)}</tr>`;
-    }
-    h += '</thead><tbody>';
-
-    const rowCells = (cellOf, totalCellFn) => {
-      let s = '';
-      for (const c of dataCols){
-        const cell = cellOf(c);
-        ms.forEach((n, i) => { s += cellHtml(cell ? cell[n] : null, cfgs[n], i === 0 ? 'first' : ''); });
+  async function update(){
+    pending = true; if (running) return; running = true;
+    try{
+      while (pending){
+        pending = false;
+        try{ const r = await readItems(); items = r.items; globalMessage = r.message; }
+        catch(err){ items = []; globalMessage = 'Não foi possível ler os campos: ' + errText(err); }
+        if (!pending) render();
       }
-      if (showTotalCol){
-        const t = totalCellFn() || {};
-        ms.forEach((n, i) => { s += cellHtml(t[n], cfgs[n], i === 0 ? 'first tc' : 'tc'); });
-      }
-      return s;
-    };
-    for (const r of dataRows){
-      h += `<tr><th title="${esc(r.label)}">${esc(r.label)}</th>`;
-      h += rowCells(c => model.cell(r.key, c.key), () => totalColCell(r));
-      h += '</tr>';
-    }
-    if (showTotalRow){
-      h += `<tr class="tr"><th>${esc(totalRow ? totalRow.label : config.totalRowLabel)}</th>`;
-      h += rowCells(c => totalRowCell(c), grandCell);
-      h += '</tr>';
-    }
-    h += '</tbody>';
-    tbl.innerHTML = h;
-
-    const first = tbl.querySelector('thead tr');
-    if (first) tbl.style.setProperty('--h1', first.getBoundingClientRect().height + 'px');
-    let msg = globalMessage || model.message || '';
-    if (!msg && config.totalRowMode === 'label' && !totalRow) msg = `Linha "${config.totalRowLabel}" não encontrada nos dados; tabela sem linha de total.`;
-    $('notice').textContent = msg;
+    }finally{ running = false; }
   }
 
-  // ===== Painel de configuração =====
-  const colorIds = {head:'colorHeadInput', headText:'colorHeadTextInput', total:'colorTotalInput', text:'colorTextInput'};
-  const TOTAL_OPTS = [['sum','Soma'],['wavg','Média ponderada'],['avg','Média simples'],['min','Mínimo'],['max','Máximo'],['none','Sem total']];
+  // ===== Painel =====
+  const colorIds = {accent:'colorAccentInput', value:'colorValueInput', title:'colorTitleInput', muted:'colorMutedInput', up:'colorUpInput', down:'colorDownInput', card:'colorCardInput'};
+  const outputs = [['gapInput','gapValue'],['fontTitleInput','fontTitleValue'],['fontValueInput','fontValueValue'],['fontSmallInput','fontSmallValue'],['iconSizeInput','iconSizeValue']];
+  const updateOutputs = () => { for (const [i, o] of outputs) $(o).textContent = $(i).value + ' px'; };
 
-  function renderMeasureEditor(){
-    const box = $('measuresContainer'), ms = model && model.measures ? model.measures : [];
-    if (!ms.length){ box.innerHTML = '<p class="hint">Arraste as medidas para a entrada <strong>Medidas</strong> e abra o Configurar de novo.</p>'; return; }
-    box.innerHTML = ms.map(n => {
-      const c = measureCfg(n, ms);
-      const weights = ms.filter(x => x !== n).map(x => `<option value="${esc(x)}"${x === c.weight ? ' selected' : ''}>${esc(bareName(x))}</option>`).join('');
-      return `<div class="m-row" data-name="${esc(n)}">
-        <div class="m-name" title="${esc(n)}">${esc(bareName(n))}</div>
-        <label>Rótulo<input class="m-label" maxlength="30" value="${esc(c.label)}"></label>
-        <label>Decimais<select class="m-dec">${[0,1,2,3,4].map(d => `<option${d === c.decimals ? ' selected' : ''}>${d}</option>`).join('')}</select></label>
-        <label>Total (se calculado)<select class="m-total">${TOTAL_OPTS.map(([v, t]) => `<option value="${v}"${v === c.total ? ' selected' : ''}>${t}</option>`).join('')}</select></label>
-        <label>Peso<select class="m-weight"><option value="">—</option>${weights}</select></label>
+  function renderCardEditor(){
+    const box = $('cardsContainer');
+    if (!items.length){ box.innerHTML = '<p class="hint">Nenhum indicador lido ainda. Arraste os campos e abra o Configurar de novo.</p>'; return; }
+    box.innerHTML = items.slice(0, MAX_CARDS).map(it => {
+      const c = cardCfg(it.title);
+      const opt = (list, cur) => list.map(([v, t]) => `<option value="${v}"${v === cur ? ' selected' : ''}>${t}</option>`).join('');
+      return `<div class="c-row" data-title="${esc(it.title)}">
+        <div class="c-name" title="${esc(it.title)}">${esc(it.title)}</div>
+        <label>Ícone<select class="c-icon">${opt(ICONS, c.icon)}</select></label>
+        <label>Sufixo<input class="c-suffix" maxlength="12" value="${esc(c.suffix)}"></label>
+        <label>Decimais<select class="c-dec">${[0,1,2,3,4].map(d => `<option${d === c.decimals ? ' selected' : ''}>${d}</option>`).join('')}</select></label>
+        <label>Variação<select class="c-dmode">${opt(DELTA_MODES, c.deltaMode)}</select></label>
+        <label>Dec. var.<select class="c-ddec">${[0,1,2,3].map(d => `<option${d === c.deltaDecimals ? ' selected' : ''}>${d}</option>`).join('')}</select></label>
       </div>`;
     }).join('');
-    syncModes();
   }
-  function syncModes(){
-    const calc = $('totalColModeInput').value === 'calc' || $('totalRowModeInput').value === 'calc';
-    $('totalColLabelInput').disabled = $('totalColModeInput').value !== 'label' && $('totalColModeInput').value !== 'calc';
-    $('totalRowLabelInput').disabled = $('totalRowModeInput').value === 'none';
-    $('measuresContainer').querySelectorAll('.m-row').forEach(row => {
-      row.querySelector('.m-total').disabled = !calc;
-      row.querySelector('.m-weight').disabled = !calc || row.querySelector('.m-total').value !== 'wavg';
-    });
-  }
-
   function openConfig(){
     if (!author || saving) return;
     const c = config;
-    $('showHeaderInput').checked = c.showHeader; $('sectionTitleInput').value = c.sectionTitle;
-    $('sectionNoteInput').value = c.sectionNote; $('iconColorInput').value = c.iconColor;
-    $('totalColModeInput').value = c.totalColMode; $('totalColLabelInput').value = c.totalColLabel;
-    $('totalRowModeInput').value = c.totalRowMode; $('totalRowLabelInput').value = c.totalRowLabel;
-    renderMeasureEditor();
-    $('rowHeaderInput').value = c.rowHeader; $('emptyInput').value = c.empty;
-    $('fontSizeInput').value = String(c.fontSize); $('fontSizeValue').textContent = c.fontSize + ' px';
-    $('dimZerosInput').checked = c.dimZeros; $('zebraInput').checked = c.zebra;
-    $('fillHeightInput').checked = c.fillHeight; $('upperGroupsInput').checked = c.upperGroups;
+    renderCardEditor();
+    $('detailInput').value = c.detail; $('uppercaseInput').checked = c.uppercase;
+    $('columnsInput').value = String(c.columns); $('minCardInput').value = String(c.minCard); $('gapInput').value = String(c.gap);
+    $('fontTitleInput').value = String(c.fontTitle); $('fontValueInput').value = String(c.fontValue);
+    $('fontSmallInput').value = String(c.fontSmall); $('iconSizeInput').value = String(c.iconSize);
     for (const [k, id] of Object.entries(colorIds)) $(id).value = c.colors[k];
-    $('themeInput').value = c.theme;
-    syncModes();
+    $('accentBarInput').checked = c.accentBar; $('showCardInput').checked = c.showCard; $('themeInput').value = c.theme;
+    updateOutputs(); $('minCardInput').disabled = c.columns !== 0;
     $('saveStatus').textContent = ''; $('settingsPanel').hidden = false;
   }
-  function closeConfig(){ $('settingsPanel').hidden = true; }
-
   async function saveConfig(e){
     e.preventDefault(); if (!author || saving) return;
-    const measures = {...config.measures};
-    $('measuresContainer').querySelectorAll('.m-row').forEach(row => {
-      const total = row.querySelector('.m-total').value, weight = row.querySelector('.m-weight').value;
-      measures[row.dataset.name] = {
-        label:row.querySelector('.m-label').value.trim() || bareName(row.dataset.name),
-        decimals:Number(row.querySelector('.m-dec').value),
-        total:total === 'wavg' && !weight ? 'avg' : total, weight
-      };
+    const cardsCfg = {...config.cards};
+    $('cardsContainer').querySelectorAll('.c-row').forEach(row => {
+      cardsCfg[row.dataset.title] = sanitizeCard({icon:row.querySelector('.c-icon').value, suffix:row.querySelector('.c-suffix').value.trim(),
+        decimals:Number(row.querySelector('.c-dec').value), deltaMode:row.querySelector('.c-dmode').value, deltaDecimals:Number(row.querySelector('.c-ddec').value)});
     });
     const candidate = {
-      version:CONFIG_VERSION,
-      showHeader:$('showHeaderInput').checked, sectionTitle:$('sectionTitleInput').value.trim(),
-      sectionNote:$('sectionNoteInput').value.trim(), iconColor:$('iconColorInput').value,
-      measures,
-      totalColMode:$('totalColModeInput').value, totalColLabel:$('totalColLabelInput').value.trim() || 'TOTAL',
-      totalRowMode:$('totalRowModeInput').value, totalRowLabel:$('totalRowLabelInput').value.trim() || 'Total',
-      rowHeader:$('rowHeaderInput').value.trim(), empty:$('emptyInput').value,
-      fontSize:Number($('fontSizeInput').value), dimZeros:$('dimZerosInput').checked, zebra:$('zebraInput').checked,
-      fillHeight:$('fillHeightInput').checked, upperGroups:$('upperGroupsInput').checked,
+      version:CONFIG_VERSION, cards:cardsCfg,
+      detail:$('detailInput').value.trim(), uppercase:$('uppercaseInput').checked,
+      columns:Number($('columnsInput').value), minCard:Number($('minCardInput').value), gap:Number($('gapInput').value),
+      fontTitle:Number($('fontTitleInput').value), fontValue:Number($('fontValueInput').value),
+      fontSmall:Number($('fontSmallInput').value), iconSize:Number($('iconSizeInput').value),
       colors:Object.fromEntries(Object.entries(colorIds).map(([k, id]) => [k, $(id).value])),
-      theme:$('themeInput').value
+      accentBar:$('accentBarInput').checked, showCard:$('showCardInput').checked, theme:$('themeInput').value
     };
+    if (!Number.isInteger(candidate.minCard) || candidate.minCard < 140 || candidate.minCard > 500){ $('saveStatus').textContent = 'Largura mínima do card: entre 140 e 500.'; return; }
     const settings = tableau.extensions.settings, previous = settings.get(CONFIG_KEY);
     saving = true; $('save').disabled = $('close').disabled = true; $('saveStatus').textContent = 'Salvando…';
     try{
@@ -392,26 +293,17 @@
     }finally{ saving = false; $('save').disabled = $('close').disabled = false; }
   }
 
-  async function update(){
-    pending = true; if (running) return; running = true;
-    try{
-      while (pending){
-        pending = false;
-        try{ model = await readModel(); globalMessage = model.rows ? '' : model.message; }
-        catch(err){ model = null; globalMessage = 'Não foi possível ler os campos: ' + errText(err); }
-        if (!pending) render();
-      }
-    }finally{ running = false; }
-  }
-
   // ===== Eventos =====
-  $('fontSizeInput').addEventListener('input', () => { $('fontSizeValue').textContent = $('fontSizeInput').value + ' px'; });
-  ['totalColModeInput','totalRowModeInput'].forEach(id => $(id).addEventListener('change', syncModes));
-  $('measuresContainer').addEventListener('change', e => { if (e.target.classList.contains('m-total')) syncModes(); });
-  $('resetColors').addEventListener('click', () => { for (const [k, id] of Object.entries(colorIds)) $(id).value = defaultColors[k]; $('iconColorInput').value = defaults.iconColor; });
+  for (const [i] of outputs) $(i).addEventListener('input', updateOutputs);
+  $('columnsInput').addEventListener('change', () => { $('minCardInput').disabled = $('columnsInput').value !== '0'; });
+  $('resetColors').addEventListener('click', () => { for (const [k, id] of Object.entries(colorIds)) $(id).value = defaultColors[k]; });
   $('configure').addEventListener('click', openConfig);
-  $('close').addEventListener('click', closeConfig);
+  $('close').addEventListener('click', () => { $('settingsPanel').hidden = true; });
   $('settingsForm').addEventListener('submit', saveConfig);
+  if ('ResizeObserver' in window){
+    let raf = 0;
+    new ResizeObserver(() => { cancelAnimationFrame(raf); raf = requestAnimationFrame(layout); }).observe($('grid'));
+  } else window.addEventListener('resize', layout);
 
   async function init(){
     try{
