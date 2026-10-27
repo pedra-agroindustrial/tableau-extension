@@ -1,0 +1,64 @@
+:root{color-scheme:light;--bg:#fff;--panel:#fff;--ink:#1f2933;--border:#cfd6dd;--muted:#6b7480;
+  --accent:#1e7b34;--text:#1f2933;--fs-title:16px;--fs:12px}
+html.gray,body.gray{--bg:#e2e2e2}
+html.transparent,body.transparent{--bg:transparent}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);font:14px "Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
+[hidden]{display:none!important}
+main{width:100%;height:100%;padding:8px;display:flex}
+.panel{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;gap:6px;padding:12px 14px;background:#fff}
+body.card-on .panel{border:1px solid #e3e7eb;border-radius:12px;box-shadow:0 2px 6px rgba(16,24,40,.06)}
+.section-head{display:flex;align-items:flex-start;gap:10px;min-width:0;flex:none}
+.section-icon{width:28px;height:28px;flex:none;color:var(--accent);margin-top:2px}
+.head-text{min-width:0;flex:1}
+#sectionTitle{margin:0;font-size:var(--fs-title);font-weight:800;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:.2px}
+#sectionSubtitle{font-size:calc(var(--fs-title)*.75);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+body.header-off .section-head{display:none}
+#notice{margin:0;font-size:11px;color:var(--muted);text-align:center;flex:none}
+#notice:empty{display:none}
+.chart{flex:1;min-height:0;min-width:0;position:relative}
+.chart svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+/* painel de configuração */
+#configure{position:absolute;right:10px;bottom:8px;z-index:3;font-size:11px;padding:4px 8px;opacity:.75}
+#configure:hover{opacity:1}
+#settingsPanel{position:fixed;inset:0;z-index:5;overflow:auto;padding:20px;background:var(--panel)}
+form{max-width:520px;margin:auto}
+form h2{font-size:20px;margin:0 0 8px}
+fieldset.group{border:1px solid var(--border);border-radius:8px;padding:6px 12px 10px;margin:12px 0}
+legend{font-weight:700;padding:0 5px}
+label{display:block;margin:10px 0}
+button,input,select,textarea{font:inherit;border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--ink);background:var(--panel)}
+input,select,textarea{display:block;width:100%;margin-top:4px}
+textarea{resize:vertical;font-family:Consolas,monospace;font-size:12px}
+input[type=color]{height:40px;padding:3px}
+input[type=range]{padding:0}
+input:disabled,select:disabled{opacity:.45}
+output{font-weight:600;color:var(--muted)}
+.checkbox{display:flex;align-items:center;gap:8px}
+.checkbox input{width:auto;margin:0}
+.hint{font-size:12px;color:var(--muted)}
+.two,.color-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
+.color-grid label{font-size:12px}
+button{cursor:pointer}
+button:disabled{opacity:.55;cursor:not-allowed}
+.actions{display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:-20px;background:var(--panel);padding:10px 0}
+#save{background:var(--ink);color:var(--panel)}
+#saveStatus{font-size:13px}
+/* ===== Rosca de participação ===== */
+.body-row{flex:1;min-height:0;display:flex;gap:14px;align-items:stretch}
+.chart{flex:1.35}
+.legend-list{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:4px;overflow:hidden}
+.leg-item{display:grid;grid-template-columns:14px 1fr auto;column-gap:10px;row-gap:1px;align-items:center;padding:5px 2px;border-bottom:1px solid #eef1f3}
+.leg-item:last-child{border-bottom:none}
+.leg-item i{width:13px;height:13px;border-radius:50%;grid-row:span 2}
+.leg-name{font-size:var(--fs);font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;grid-column:2 / 4}
+.leg-val{font-size:calc(var(--fs)*1.08);color:var(--text);white-space:nowrap}
+.leg-pct{font-size:calc(var(--fs)*1.08);color:var(--text);white-space:nowrap;text-align:right}
+.leg-item.zero .leg-name,.leg-item.zero .leg-val,.leg-item.zero .leg-pct{color:var(--muted)}
+body.legend-off .legend-list{display:none}
+.center-value{font-weight:800;fill:var(--text);text-anchor:middle}
+.center-label{fill:var(--muted);text-anchor:middle}
+.slice-label{fill:var(--text);font-size:var(--fs);text-anchor:middle}
+.slice{transition:opacity .2s}
+.legend-list.narrow .leg-item{grid-template-columns:12px 1fr}
+.legend-list.narrow .leg-pct{grid-column:2;text-align:left}
