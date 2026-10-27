@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tabela Consolidada</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css?v=1.1.0">
+<script defer src="vendor/tableau.extensions.js"></script>
+<script defer src="app.js?v=1.1.0"></script>
+</head>
+<body class="light">
+<button id="configure" type="button" hidden>Configurar</button>
+
+<main id="main">
+  <section id="panel" class="panel">
+    <header id="sectionHead" class="section-head">
+      <svg class="section-icon" viewBox="0 0 32 32" aria-hidden="true">
+        <rect class="ic-bg" x="1" y="1" width="30" height="30" rx="7"/>
+        <rect class="ic-fg" x="7" y="8" width="5" height="4" rx="1"/><rect class="ic-fg" x="14" y="8" width="11" height="4" rx="1"/>
+        <rect class="ic-fg" x="7" y="14" width="5" height="4" rx="1"/><rect class="ic-fg" x="14" y="14" width="11" height="4" rx="1"/>
+        <rect class="ic-fg" x="7" y="20" width="5" height="4" rx="1"/><rect class="ic-fg" x="14" y="20" width="11" height="4" rx="1"/>
+      </svg>
+      <h1 id="sectionTitle">CONSOLIDADO POR HORA E UNIDADE</h1>
+      <span id="sectionNote">Valores em toneladas (t), fibra (%) e ATR</span>
+    </header>
+    <div id="tableWrap" class="table-wrap"><table id="table"></table></div>
+    <p id="notice" role="status">Conectando ao Tableau…</p>
+  </section>
+</main>
+
+<section id="settingsPanel" hidden aria-label="Configuração da tabela">
+  <form id="settingsForm" novalidate>
+    <h2>Configurar tabela</h2>
+    <p class="hint">Entradas: <strong>Linha</strong> (ORDEM_LINHA + HORA), <strong>Coluna</strong> (ORDEM_COLUNA + NOME_USINA) e <strong>Medidas</strong> (CANA, FIBRA, ATR — a ordem das pílulas define a ordem das colunas).</p>
+
+    <fieldset class="group"><legend>Cabeçalho</legend>
+      <label class="checkbox"><input id="showHeaderInput" type="checkbox"> Exibir cabeçalho</label>
+      <label>Título<input id="sectionTitleInput" maxlength="80"></label>
+      <label>Observação (à direita)<input id="sectionNoteInput" maxlength="120"></label>
+      <label>Cor do ícone<input id="iconColorInput" type="color"></label>
+    </fieldset>
+
+    <fieldset class="group"><legend>Totais</legend>
+      <p class="hint">Por padrão a extensão <strong>não calcula</strong> totais: usa os que vêm da base e só os destaca em verde.</p>
+      <label>Coluna de total<select id="totalColModeInput">
+        <option value="last">Última coluna dos dados (ex.: TOTAL em NOME_USINA)</option>
+        <option value="label">Coluna com o rótulo abaixo</option>
+        <option value="calc">Calcular pela extensão</option>
+        <option value="none">Sem destaque de total</option>
+      </select></label>
+      <label>Rótulo da coluna de total<input id="totalColLabelInput" maxlength="30"></label>
+      <label>Linha de total<select id="totalRowModeInput">
+        <option value="label">Linha dos dados com o rótulo abaixo (vai para o fim)</option>
+        <option value="calc">Calcular pela extensão</option>
+        <option value="none">Sem linha de total</option>
+      </select></label>
+      <label>Rótulo da linha de total<input id="totalRowLabelInput" maxlength="30"></label>
+    </fieldset>
+
+    <fieldset class="group"><legend>Medidas</legend>
+      <p class="hint">Rótulo e casas decimais de cada medida. A regra de total só é usada quando o total for <em>calculado pela extensão</em>.</p>
+      <div id="measuresContainer"></div>
+    </fieldset>
+
+    <fieldset class="group"><legend>Exibição</legend>
+      <label>Título da 1ª coluna (vazio = nome do campo)<input id="rowHeaderInput" maxlength="30"></label>
+      <div class="two">
+        <label>Células sem dados<select id="emptyInput"><option value="zero">Mostrar 0</option><option value="dash">Mostrar —</option><option value="blank">Em branco</option></select></label>
+        <label>Fonte: <output id="fontSizeValue"></output><input id="fontSizeInput" type="range" min="9" max="22" step="1"></label>
+      </div>
+      <label class="checkbox"><input id="dimZerosInput" type="checkbox"> Zeros em cinza</label>
+      <label class="checkbox"><input id="zebraInput" type="checkbox"> Linhas zebradas</label>
+      <label class="checkbox"><input id="fillHeightInput" type="checkbox"> Esticar as linhas para ocupar a altura</label>
+      <label class="checkbox"><input id="upperGroupsInput" type="checkbox"> Nomes das colunas em MAIÚSCULAS</label>
+    </fieldset>
+
+    <fieldset class="group"><legend>Cores</legend>
+      <div class="color-grid">
+        <label>Cabeçalho da tabela<input id="colorHeadInput" type="color"></label>
+        <label>Texto do cabeçalho<input id="colorHeadTextInput" type="color"></label>
+        <label>Fundo dos totais<input id="colorTotalInput" type="color"></label>
+        <label>Texto<input id="colorTextInput" type="color"></label>
+      </div>
+      <label>Fundo da área<select id="themeInput"><option value="light">Branco</option><option value="gray">Cinza claro</option><option value="transparent">Transparente</option></select></label>
+      <button id="resetColors" type="button">Restaurar cores padrão</button>
+    </fieldset>
+
+    <p id="saveStatus" role="status"></p>
+    <div class="actions"><button id="close" type="button">Fechar</button><button id="save" type="submit">Salvar configuração</button></div>
+  </form>
+</section>
+</body>
+</html>
