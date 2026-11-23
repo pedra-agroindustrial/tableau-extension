@@ -52,3 +52,4 @@ input:disabled{opacity:.45}
 .actions{display:flex;gap:10px;justify-content:flex-end}
 #save{background:#1f2933;color:#fff}
 #saveStatus{font-size:13px}
+body.page-hidden .dot{animation-play-state:paused!important}
