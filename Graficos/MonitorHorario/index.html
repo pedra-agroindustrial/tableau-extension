@@ -3,13 +3,92 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- Evita que o Chrome/Edge pinte o iframe de branco no Tableau Cloud/Server
+     (fundo opaco ocorre quando o color-scheme do iframe difere da página do Tableau) -->
+<meta name="color-scheme" content="light only">
 <title>Monitor de Horário — atualização dos dados</title>
 <link rel="icon" href="data:,">
-<link rel="stylesheet" href="style.css?v=1.0.3">
+<link rel="stylesheet" href="style.css?v=1.0.4">
+
+<!-- Correções de renderização no Server (carregam DEPOIS do style.css para ter prioridade) -->
+<style>
+  :root { color-scheme: light only; }
+
+  html, body {
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  /* o html nunca pinta fundo: quem define a cor é o tema aplicado no body */
+  html { background: transparent !important; }
+
+  body.transparent,
+  body.transparent #main,
+  body.transparent #grid { background: transparent !important; box-shadow: none !important; border: 0 !important; }
+
+  /* fonte idêntica no Desktop e no Server (evita texto mais largo e cortado) */
+  body, button, input, select, textarea {
+    font-family: "Segoe UI", "Benton Sans", "Helvetica Neue", Arial, sans-serif;
+  }
+
+  /* alerta em uma linha, sem quebrar e sem cortar o tempo */
+  .alert {
+    display: inline-flex !important;
+    align-items: center;
+    gap: .4em;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  .alert .dot   { flex: 0 0 auto; }
+  .alert .unit-name,
+  .alert .label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .alert .delay { flex: 0 0 auto; }
+
+  /* modos responsivos (classes no <html> para o app.js não sobrescrever) */
+  html.compact .alert .unit-name { display: none; }
+  html.mini    .alert .label     { display: none; }
+  html.micro   .alert .delay     { display: none; }
+
+  /* botão de tooltip não ocupa espaço nem sobrepõe o alerta; aparece só no hover */
+  #tipToggle {
+    position: fixed; top: 2px; right: 2px; z-index: 5;
+    opacity: 0; transition: opacity .15s;
+    background: transparent; border: 0; padding: 0 2px; cursor: pointer;
+  }
+  body:hover #tipToggle, #tipToggle:focus-visible { opacity: .7; }
+  html.mini #tipToggle { display: none; }
+
+  /* painel de configuração sempre opaco, mesmo com tema transparente */
+  #settingsPanel { background: #fff !important; color: #111; overflow: auto; max-height: 100vh; }
+</style>
+
+<script>
+  /* aplica modos compactos conforme a largura REAL do iframe (muda no Server) */
+  (function () {
+    function ajustar() {
+      var w = window.innerWidth, r = document.documentElement.classList;
+      r.toggle('compact', w < 220);
+      r.toggle('mini',    w < 130);
+      r.toggle('micro',   w < 50);
+    }
+    window.addEventListener('resize', ajustar);
+    document.addEventListener('DOMContentLoaded', function () {
+      ajustar();
+      if (window.ResizeObserver) new ResizeObserver(ajustar).observe(document.body);
+    });
+  })();
+</script>
+
 <script defer src="vendor/tableau.extensions.js"></script>
-<script defer src="app.js?v=1.0.3"></script>
+<script defer src="app.js?v=1.0.4"></script>
 </head>
-<body class="light">
+<!-- padrão transparente: evita "flash" branco antes do app.js aplicar o tema salvo -->
+<body class="transparent">
 <button id="configure" type="button" hidden>Configurar</button>
 <button id="tipToggle" type="button" aria-pressed="true" title="Ligar/desligar tooltip">ⓘ</button>
 <main id="main">
@@ -17,7 +96,6 @@
   <p id="notice" role="status">Conectando ao Tableau…</p>
 </main>
 <div id="tip" class="tip" hidden></div>
-
 <template id="alertTemplate">
   <article class="alert">
     <span class="dot"></span>
@@ -26,13 +104,11 @@
     <span class="delay"></span>
   </article>
 </template>
-
 <section id="settingsPanel" hidden aria-label="Configuração do monitor">
   <form id="settingsForm" novalidate>
-    <h2>Configurar monitor de horário <small class="ver">v1.0.3</small></h2>
+    <h2>Configurar monitor de horário <small class="ver">v1.0.4</small></h2>
     <p class="hint">Arraste a <strong>dimensão de data/hora</strong> para <strong>Data</strong> no cartão Marcas.
       <strong>Unidade</strong> é opcional: sem ela, a unidade é lida do filtro aplicado na planilha.</p>
-
     <fieldset class="group"><legend>Limites do alerta (minutos)</legend>
       <div class="two">
         <label><span class="sw" style="background:#16a34a"></span>Atualizado até<input id="normalInput" type="number" min="0" step="1"></label>
@@ -44,7 +120,6 @@
       </div>
       <p class="hint">Acima de “Atrasado até” = <b style="color:#dc2626">CRÍTICO</b>. A diferença é exibida em segundos.</p>
     </fieldset>
-
     <fieldset class="group"><legend>Fuso horário</legend>
       <p class="hint">A carga grava sempre no horário de <b>São Paulo</b>. O fuso da unidade é nivelado com SP antes da comparação
         (ex.: carga 10:16:19 SP e agora 09:17:26 MT = 10:17:26 SP → diferença 1 min 07 s).</p>
@@ -52,7 +127,6 @@
       <label>Unidade → fuso (um por linha: TEXTO=Fuso)
         <textarea id="tzMapInput" rows="3" placeholder="MT=America/Cuiaba&#10;MATO GROSSO=America/Cuiaba"></textarea></label>
     </fieldset>
-
     <fieldset class="group"><legend>Exibição</legend>
       <div class="two">
         <label>Recalcular a cada (seg)<input id="tickInput" type="number" min="1" max="600" step="1"></label>
@@ -63,9 +137,8 @@
       <label class="checkbox"><input id="pulseInput" type="checkbox"> Piscar quando CRÍTICO / À FRENTE</label>
       <label class="checkbox"><input id="tooltipInput" type="checkbox"> Exibir tooltip ao passar o mouse</label>
       <label>Tamanho da fonte: <output id="fontValue"></output><input id="fontInput" type="range" min="10" max="28" step="1"></label>
-      <label>Fundo da área<select id="themeInput"><option value="light">Branco</option><option value="gray">Cinza claro</option><option value="transparent">Transparente</option><option value="dark">Escuro</option></select></label>
+      <label>Fundo da área<select id="themeInput"><option value="transparent">Transparente</option><option value="light">Branco</option><option value="gray">Cinza claro</option><option value="dark">Escuro</option></select></label>
     </fieldset>
-
     <p id="saveStatus" role="status"></p>
     <div class="actions"><button id="close" type="button">Fechar</button><button id="save" type="submit">Salvar configuração</button></div>
   </form>
