@@ -1,82 +1,54 @@
-:root{
-  color-scheme:light;
-  --bg:#fff;--panel:#fff;--ink:#1f2933;--border:#cfd6dd;--muted:#6b7480;
-  --fs:14px;--gap:6px;--cols:1;--rows:1;
-}
-html.gray,body.gray{--bg:#e2e2e2}
-html.transparent,body.transparent{--bg:transparent}
-html.dark,body.dark{--bg:#191b20;--panel:#25272c;--ink:#efefef;--border:#60636a;color-scheme:dark}
-*{box-sizing:border-box}
-html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--bg);color:var(--ink);
-  font:14px "Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
+/* ===== Base: ocupa exatamente o objeto do dashboard, sem rolagem ===== */
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:transparent;
+  font-family:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif}
 [hidden]{display:none!important}
-main{width:100%;height:100%;display:flex;flex-direction:column;gap:var(--gap);padding:var(--gap)}
-#notice{margin:0;font-size:11px;color:var(--muted);text-align:center;line-height:1.2;flex:none}
-#notice:empty{display:none}
 
-/* ===== Grade de alertas ===== */
-.grid{flex:1;min-height:0;display:grid;gap:var(--gap);
-  grid-template-columns:repeat(var(--cols),minmax(0,1fr));
-  grid-template-rows:repeat(var(--rows),minmax(0,1fr))}
+:root{--ok:#1e8e3e;--warn:#e0a100;--late:#d32f2f;--wait:#8a949e;--c:var(--wait);--bg:#e6f4ea;--bd:#b9dcc3;--fg:#1f2933}
 
-/* ===== Alerta ===== */
-.alert{--c:#9aa3ab;min-width:0;min-height:0;display:flex;align-items:center;justify-content:center;gap:8px;
-  padding:4px 12px;border-radius:8px;border:1.5px solid var(--c);color:var(--c);
-  background:color-mix(in srgb,var(--c) 12%,var(--panel));font-size:var(--fs);font-weight:700;
-  white-space:nowrap;overflow:hidden;cursor:default;user-select:none}
-.alert .dot{width:.72em;height:.72em;border-radius:50%;background:var(--c);flex:none}
-.alert .unit-name{color:var(--ink);overflow:hidden;text-overflow:ellipsis;min-width:0}
-.alert .unit-name:empty{display:none}
-.alert .label{overflow:hidden;text-overflow:ellipsis}
-.alert .delay{font-weight:800;font-variant-numeric:tabular-nums}
-.alert .delay:empty{display:none}
-body.unit-off .alert .unit-name{display:none}
-body.pulse-on .alert.blink .dot,body.pulse-on .alert.blink .label{animation:blink 1.1s ease-in-out infinite}
-@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
-body.page-hidden .alert .dot,body.configuring .alert .dot,
-body.page-hidden .alert .label,body.configuring .alert .label{animation-play-state:paused!important}
-@media (prefers-reduced-motion:reduce){.alert .dot,.alert .label{animation:none!important}}
+/* caixa: 100% do espaço, conteúdo centralizado, fonte proporcional ao tamanho */
+.box{position:absolute;inset:2px;display:flex;align-items:center;justify-content:center;gap:.45em;
+  padding:0 .6em;border-radius:8px;overflow:hidden;white-space:nowrap;
+  background:var(--bg);border:1px solid var(--bd);color:var(--fg)}
+.box .txt{font-size:12px;line-height:1}   /* tamanho final calculado pelo app.js para caber */
+.box b{color:var(--c);font-weight:800;letter-spacing:.3px}
+#age{font-weight:700;color:var(--c);font-variant-numeric:tabular-nums}
+.dot{flex:none;width:8px;aspect-ratio:1;border-radius:50%;background:var(--c)}
+.st-ok{--c:var(--ok)} .st-warn{--c:var(--warn)} .st-late{--c:var(--late)} .st-wait{--c:var(--wait)}
+.st-late .dot{animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+@media (prefers-reduced-motion:reduce){.dot{animation:none!important}}
 
-/* ===== Tooltip ===== */
-.tip{position:fixed;z-index:4;min-width:240px;max-width:330px;padding:8px 10px;pointer-events:none;
-  background:#fff;color:#1f2933;border:1px solid #cfd6dd;border-radius:6px;
-  box-shadow:0 4px 14px rgba(0,0,0,.16);font-size:11px;line-height:1.35}
-.tip .t-head{font-weight:800;font-size:12px;margin-bottom:4px}
-.tip .t-row{display:flex;justify-content:space-between;gap:10px;padding:2px 0;border-top:1px solid #f0f2f4}
-.tip .t-row span{color:#6b7480;white-space:nowrap}
-.tip .t-row b{font-weight:600;text-align:right;font-variant-numeric:tabular-nums}
-.tip .t-warn{margin-top:5px;color:#7c3aed;font-weight:600}
+/* temas de fundo */
+body.bg-claro .box{--bg:#e6f4ea;--bd:#b9dcc3}
+body.bg-transparente .box{--bg:transparent;--bd:transparent}
+body.bg-sobre-verde .box{--bg:transparent;--bd:rgba(255,255,255,.55);--fg:#fff}
+body.bg-sobre-verde .box b,body.bg-sobre-verde #age{color:#fff}
+body.bg-sobre-verde .st-ok{--c:#a5f3a5} body.bg-sobre-verde .st-warn{--c:#ffe082} body.bg-sobre-verde .st-late{--c:#ffb4ab}
+body.bg-solido .box{--bd:transparent}
 
-/* ===== Painel de configuração (padrão Motor Grade) ===== */
-#configure{position:absolute;right:6px;bottom:4px;z-index:3;font-size:11px;padding:3px 8px;opacity:.75}
-#configure:hover{opacity:1}
-#settingsPanel{position:fixed;inset:0;z-index:5;overflow:auto;padding:20px;background:var(--panel)}
-form{max-width:480px;margin:auto}
-form h2{font-size:20px;margin:0 0 8px}
-fieldset.group{border:1px solid var(--border);border-radius:8px;padding:6px 12px 10px;margin:12px 0}
-legend{font-weight:700;padding:0 5px}
-label{display:block;margin:10px 0}
-button,input,select,textarea{font:inherit;border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:var(--ink);background:var(--panel)}
-input,select,textarea{display:block;width:100%;margin-top:4px}
-textarea{resize:vertical;font-family:Consolas,monospace;font-size:12px}
-input[type=range]{padding:0}
-output{font-weight:600;color:var(--muted)}
+/* botão de configurar: só no modo de edição, dentro da caixa, aparece ao passar o mouse */
+#configure{position:absolute;top:3px;right:4px;z-index:3;border:0;background:transparent;cursor:pointer;
+  font-size:11px;line-height:1;padding:2px;opacity:0;color:#555}
+body:hover #configure{opacity:.8}
+
+/* ===== Painel de configuração ===== */
+#settingsPanel{position:fixed;inset:0;z-index:5;overflow:auto;padding:16px;background:#fff;color:#1f2933;font-size:14px}
+form{max-width:520px;margin:auto}
+form h2{font-size:18px;margin:0 0 6px}
+fieldset.group{border:1px solid #cfd6dd;border-radius:8px;padding:6px 12px 10px;margin:10px 0}
+legend{font-weight:700;padding:0 5px;font-size:13px}
+label{display:block;margin:8px 0;font-size:13px}
+input,select,textarea,button{font:inherit;border:1px solid #cfd6dd;border-radius:6px;padding:7px 9px;background:#fff;color:#1f2933}
+input,select,textarea{display:block;width:100%;margin-top:3px}
+textarea{font-family:Consolas,monospace;font-size:12px;resize:vertical}
+input[type=color]{height:38px;padding:3px}
+input:disabled{opacity:.45}
 .checkbox{display:flex;align-items:center;gap:8px}
 .checkbox input{width:auto;margin:0}
-.hint{font-size:12px;color:var(--muted)}
-.two{display:grid;grid-template-columns:1fr 1fr;gap:0 12px}
-.sw{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
-button{cursor:pointer}
-button:disabled{opacity:.55;cursor:not-allowed}
-.actions{display:flex;gap:10px;justify-content:flex-end;position:sticky;bottom:-20px;background:var(--panel);padding:10px 0}
-#save{background:var(--ink);color:var(--panel)}
+.hint{font-size:12px;color:#6b7480}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:0 10px}
+.three{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 10px}
+.actions{display:flex;gap:10px;justify-content:flex-end}
+#save{background:#1f2933;color:#fff}
 #saveStatus{font-size:13px}
-button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
-
-/* ===== Botão liga/desliga tooltip ===== */
-#tipToggle{position:absolute;top:4px;right:6px;z-index:3;width:22px;height:22px;padding:0;border-radius:50%;
-  font-size:13px;line-height:20px;text-align:center;opacity:.55;background:var(--panel);color:var(--ink)}
-#tipToggle:hover{opacity:1}
-#tipToggle.off{text-decoration:line-through;opacity:.35;color:var(--muted)}
-.tip .t-ver{margin-top:4px;font-size:9px;color:#9aa3ab;text-align:right}
-.ver{font-size:11px;font-weight:400;color:var(--muted)}
