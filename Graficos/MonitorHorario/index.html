@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Monitor de Horário — atualização dos dados</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="style.css?v=1.0.3">
+<script defer src="vendor/tableau.extensions.js"></script>
+<script defer src="app.js?v=1.0.3"></script>
+</head>
+<body class="light">
+<button id="configure" type="button" hidden>Configurar</button>
+<button id="tipToggle" type="button" aria-pressed="true" title="Ligar/desligar tooltip">ⓘ</button>
+<main id="main">
+  <div id="grid" class="grid" aria-live="polite"></div>
+  <p id="notice" role="status">Conectando ao Tableau…</p>
+</main>
+<div id="tip" class="tip" hidden></div>
+
+<template id="alertTemplate">
+  <article class="alert">
+    <span class="dot"></span>
+    <span class="unit-name"></span>
+    <span class="label"></span>
+    <span class="delay"></span>
+  </article>
+</template>
+
+<section id="settingsPanel" hidden aria-label="Configuração do monitor">
+  <form id="settingsForm" novalidate>
+    <h2>Configurar monitor de horário <small class="ver">v1.0.3</small></h2>
+    <p class="hint">Arraste a <strong>dimensão de data/hora</strong> para <strong>Data</strong> no cartão Marcas.
+      <strong>Unidade</strong> é opcional: sem ela, a unidade é lida do filtro aplicado na planilha.</p>
+
+    <fieldset class="group"><legend>Limites do alerta (minutos)</legend>
+      <div class="two">
+        <label><span class="sw" style="background:#16a34a"></span>Atualizado até<input id="normalInput" type="number" min="0" step="1"></label>
+        <label><span class="sw" style="background:#f59e0b"></span>Atenção até<input id="attentionInput" type="number" min="0" step="1"></label>
+      </div>
+      <div class="two">
+        <label><span class="sw" style="background:#f97316"></span>Atrasado até<input id="lateInput" type="number" min="0" step="1"></label>
+        <label><span class="sw" style="background:#7c3aed"></span>Tolerância à frente<input id="aheadInput" type="number" min="0" step="1"></label>
+      </div>
+      <p class="hint">Acima de “Atrasado até” = <b style="color:#dc2626">CRÍTICO</b>. A diferença é exibida em segundos.</p>
+    </fieldset>
+
+    <fieldset class="group"><legend>Fuso horário</legend>
+      <p class="hint">A carga grava sempre no horário de <b>São Paulo</b>. O fuso da unidade é nivelado com SP antes da comparação
+        (ex.: carga 10:16:19 SP e agora 09:17:26 MT = 10:17:26 SP → diferença 1 min 07 s).</p>
+      <label>Fuso padrão das unidades<select id="tzDefaultInput" class="tz-list"></select></label>
+      <label>Unidade → fuso (um por linha: TEXTO=Fuso)
+        <textarea id="tzMapInput" rows="3" placeholder="MT=America/Cuiaba&#10;MATO GROSSO=America/Cuiaba"></textarea></label>
+    </fieldset>
+
+    <fieldset class="group"><legend>Exibição</legend>
+      <div class="two">
+        <label>Recalcular a cada (seg)<input id="tickInput" type="number" min="1" max="600" step="1"></label>
+        <label>Formato da data (texto)
+          <select id="dateFmtInput"><option value="auto">Automático</option><option value="dmy">DD/MM/AAAA</option><option value="mdy">MM/DD/AAAA</option></select></label>
+      </div>
+      <label class="checkbox"><input id="showUnitInput" type="checkbox"> Exibir nome da unidade no alerta</label>
+      <label class="checkbox"><input id="pulseInput" type="checkbox"> Piscar quando CRÍTICO / À FRENTE</label>
+      <label class="checkbox"><input id="tooltipInput" type="checkbox"> Exibir tooltip ao passar o mouse</label>
+      <label>Tamanho da fonte: <output id="fontValue"></output><input id="fontInput" type="range" min="10" max="28" step="1"></label>
+      <label>Fundo da área<select id="themeInput"><option value="light">Branco</option><option value="gray">Cinza claro</option><option value="transparent">Transparente</option><option value="dark">Escuro</option></select></label>
+    </fieldset>
+
+    <p id="saveStatus" role="status"></p>
+    <div class="actions"><button id="close" type="button">Fechar</button><button id="save" type="submit">Salvar configuração</button></div>
+  </form>
+</section>
+</body>
+</html>
